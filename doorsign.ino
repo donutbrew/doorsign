@@ -24,21 +24,24 @@ GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
   GxEPD2_213_Z98c(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY)
 );
 
+#include "icons.h"
+#include "presets.h"
+
 // ---------- BLE UUIDs ----------
 #define SERVICE_UUID        "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 
 // ---------- Presets ----------
-String presets[] = {
-  "[big]WT{F}[/big]\\n{{Clint's Office}}",
-  "Please come\\n{downstairs}",
-  "[big]{{Do not disturb}}[/big]"
-};
+// String presets[] = {
+//   "ICON:available|[big]WT{F}[/big]\\n{{Clint's Office}}",
+//   "ICON:meeting|In a meeting\\nBack soon",
+//   "ICON:no|[big]{{Do not disturb}}[/big]"
+// };
 
 String pendingMessage = "";
 bool hasPendingMessage = false;
 
-// ---------- Text structs ----------
+// ---------- Structs ----------
 struct Segment {
   String text;
   String size;
@@ -52,7 +55,12 @@ struct TextLine {
   int height;
 };
 
-// ---------- Function prototypes ----------
+struct ParsedMessage {
+  String icon;
+  String text;
+};
+
+// ---------- Prototypes ----------
 void setFontBySize(String size);
 int lineHeightForSize(String size);
 int baselineOffsetForSize(String size);
@@ -60,6 +68,7 @@ int textWidth(String text, String size);
 void addSegmentToLine(TextLine &line, String text, String size, bool red, bool redBox);
 std::vector<TextLine> layoutText(String msg, int maxWidth);
 String shrinkMarkupSizes(String msg);
+ParsedMessage parseMessage(String msg);
 void drawMessage(String msg);
 
 // ---------- Text sizing ----------
@@ -78,10 +87,9 @@ int lineHeightForSize(String size) {
 
   int16_t tbx, tby;
   uint16_t tbw, tbh;
-
   display.getTextBounds("Ag", 0, 0, &tbx, &tby, &tbw, &tbh);
 
-  return tbh + 1;  // tighter line spacing
+  return tbh + 1;
 }
 
 int baselineOffsetForSize(String size) {
@@ -89,13 +97,11 @@ int baselineOffsetForSize(String size) {
 
   int16_t tbx, tby;
   uint16_t tbw, tbh;
-
   display.getTextBounds("Ag", 0, 0, &tbx, &tby, &tbw, &tbh);
 
   return -tby;
 }
 
-// ---------- Measure text ----------
 int textWidth(String text, String size) {
   if (text == " ") {
     if (size == "big") return 10;
@@ -112,7 +118,25 @@ int textWidth(String text, String size) {
   return tbw;
 }
 
-// ---------- Add segment ----------
+// ---------- Message parser ----------
+ParsedMessage parseMessage(String msg) {
+  ParsedMessage result;
+  result.icon = "none";
+  result.text = msg;
+
+  if (msg.startsWith("ICON:")) {
+    int pipe = msg.indexOf('|');
+    if (pipe > 5) {
+      result.icon = msg.substring(5, pipe);
+      result.text = msg.substring(pipe + 1);
+      result.icon.trim();
+    }
+  }
+
+  return result;
+}
+
+// ---------- Layout helpers ----------
 void addSegmentToLine(TextLine &line, String text, String size, bool red, bool redBox) {
   if (text.length() == 0) return;
 
@@ -135,7 +159,6 @@ void addSegmentToLine(TextLine &line, String text, String size, bool red, bool r
   }
 }
 
-// ---------- Layout rich wrapped text ----------
 std::vector<TextLine> layoutText(String msg, int maxWidth) {
   msg.replace("\\n", "\n");
   msg.replace("\\r", "\n");
@@ -271,7 +294,7 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
       newLine();
     } else if (c == ' ') {
       if (redBox) {
-        token += c;   // preserve spaces inside {{ }}
+        token += c;
       } else {
         flushToken();
       }
@@ -289,14 +312,11 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
   return lines;
 }
 
-// ---------- Shrink formatting if message is too tall ----------
 String shrinkMarkupSizes(String msg) {
   msg.replace("[big]", "[med]");
   msg.replace("[/big]", "[/med]");
-
   msg.replace("[med]", "[small]");
   msg.replace("[/med]", "[/small]");
-
   return msg;
 }
 
@@ -304,27 +324,35 @@ String shrinkMarkupSizes(String msg) {
 void drawMessage(String msg) {
   Serial.println("Drawing: " + msg);
 
+  ParsedMessage parsed = parseMessage(msg);
+  bool hasIcon = parsed.icon != "none";
+
   display.setRotation(1);
 
   display.firstPage();
   do {
     display.fillScreen(GxEPD_WHITE);
 
-    int margin = 10;
-    int maxWidth = display.width() - 2 * margin;
+    int margin = 8;
+    int iconWidth = hasIcon ? display.width() / 4 : 0;
+    int textX = hasIcon ? iconWidth + margin : margin;
+    int textMaxWidth = display.width() - textX - margin;
 
-    std::vector<TextLine> lines = layoutText(msg, maxWidth);
+    if (hasIcon) {
+      drawIcon(parsed.icon, 0, 0, iconWidth, display.height());
+    }
+
+    std::vector<TextLine> lines = layoutText(parsed.text, textMaxWidth);
 
     int totalHeight = 0;
     for (auto &line : lines) {
       totalHeight += line.height;
     }
 
-    // Auto-shrink once if message is too tall
     if (totalHeight > display.height() - 4) {
       Serial.println("Message too tall; shrinking text.");
-      msg = shrinkMarkupSizes(msg);
-      lines = layoutText(msg, maxWidth);
+      parsed.text = shrinkMarkupSizes(parsed.text);
+      lines = layoutText(parsed.text, textMaxWidth);
 
       totalHeight = 0;
       for (auto &line : lines) {
@@ -338,19 +366,18 @@ void drawMessage(String msg) {
     }
 
     int topY;
-
     if (totalHeight > display.height() - 4) {
-      // Too tall to truly center; start near top so final wrapped lines fit.
       topY = 2;
     } else {
       topY = (display.height() - totalHeight) / 2;
     }
 
-int y = topY + baselineOffsetForSize(firstLineSize);
+    int y = topY + baselineOffsetForSize(firstLineSize);
+
     for (auto &line : lines) {
       if (y > display.height() + 12) break;
 
-      int x = (display.width() - line.width) / 2;
+      int x = textX + (textMaxWidth - line.width) / 2;
 
       for (auto &seg : line.segments) {
         setFontBySize(seg.size);
@@ -447,7 +474,7 @@ void setup() {
   delay(1000);
 
   Serial.println();
-  Serial.println("===== ESP32-C3 E-PAPER BLE MESSENGER BOOT =====");
+  Serial.println("===== ESP32-C3 E-PAPER BLE MESSENGER V2 BOOT =====");
 
   SPI.begin(PIN_SPI_SCK, -1, PIN_SPI_MOSI, PIN_EPD_CS);
 
@@ -478,7 +505,6 @@ void setup() {
 
   Serial.println("BLE advertising as ESP32-EINK-MSG");
 
-  // Show slot 1 on startup
   pendingMessage = presets[0];
   hasPendingMessage = true;
 }
