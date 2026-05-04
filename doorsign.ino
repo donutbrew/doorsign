@@ -3,9 +3,9 @@
 #include <vector>
 
 #include <GxEPD2_3C.h>
-#include <Fonts/FreeMonoBold9pt7b.h>
-#include <Fonts/FreeMonoBold12pt7b.h>
-#include <Fonts/FreeMonoBold18pt7b.h>
+#include <Fonts/FreeSansBold9pt7b.h>
+#include <Fonts/FreeSansBold12pt7b.h>
+#include <Fonts/FreeSansBold18pt7b.h>
 
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -30,9 +30,9 @@ GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
 
 // ---------- Presets ----------
 String presets[] = {
-  "[big]Dinner[/big]\\nis {ready}",
+  "[big]Dinner[/big]\\nis {{ready}}",
   "Please come\\n{downstairs}",
-  "[big]{Do not disturb}[/big]"
+  "[big]{{Do not disturb}}[/big]"
 };
 
 String pendingMessage = "";
@@ -43,6 +43,7 @@ struct Segment {
   String text;
   String size;
   bool red;
+  bool redBox;
 };
 
 struct TextLine {
@@ -54,36 +55,43 @@ struct TextLine {
 // ---------- Function prototypes ----------
 void setFontBySize(String size);
 int lineHeightForSize(String size);
+int baselineOffsetForSize(String size);
 int textWidth(String text, String size);
-void addSegmentToLine(TextLine &line, String text, String size, bool red);
+void addSegmentToLine(TextLine &line, String text, String size, bool red, bool redBox);
 std::vector<TextLine> layoutText(String msg, int maxWidth);
 void drawMessage(String msg);
 
 // ---------- Text sizing ----------
 void setFontBySize(String size) {
   if (size == "big") {
-    display.setFont(&FreeMonoBold18pt7b);
+    display.setFont(&FreeSansBold18pt7b);
   } else if (size == "med") {
-    display.setFont(&FreeMonoBold12pt7b);
+    display.setFont(&FreeSansBold12pt7b);
   } else {
-    display.setFont(&FreeMonoBold9pt7b);
+    display.setFont(&FreeSansBold9pt7b);
   }
 }
 
 int lineHeightForSize(String size) {
-  if (size == "big") return 34;
-  if (size == "med") return 24;
-  return 18;
+  if (size == "big") return 36;
+  if (size == "med") return 26;
+  return 19;
 }
 
 int baselineOffsetForSize(String size) {
-  if (size == "big") return 26;
-  if (size == "med") return 18;
+  if (size == "big") return 27;
+  if (size == "med") return 19;
   return 14;
 }
 
 // ---------- Measure text ----------
 int textWidth(String text, String size) {
+  if (text == " ") {
+    if (size == "big") return 10;
+    if (size == "med") return 8;
+    return 6;
+  }
+
   setFontBySize(size);
 
   int16_t tbx, tby;
@@ -94,7 +102,7 @@ int textWidth(String text, String size) {
 }
 
 // ---------- Add segment to line ----------
-void addSegmentToLine(TextLine &line, String text, String size, bool red) {
+void addSegmentToLine(TextLine &line, String text, String size, bool red, bool redBox) {
   if (text.length() == 0) return;
 
   int w = textWidth(text, size);
@@ -103,10 +111,17 @@ void addSegmentToLine(TextLine &line, String text, String size, bool red) {
   s.text = text;
   s.size = size;
   s.red = red;
+  s.redBox = redBox;
 
   line.segments.push_back(s);
-  line.width += w;
-  line.height = max(line.height, lineHeightForSize(size));
+
+  if (redBox && text != " ") {
+    line.width += w + 10;
+    line.height = max(line.height, lineHeightForSize(size) + 6);
+  } else {
+    line.width += w;
+    line.height = max(line.height, lineHeightForSize(size));
+  }
 }
 
 // ---------- Layout rich wrapped text ----------
@@ -116,10 +131,17 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
   msg.replace("\\r", "\n");
   msg.replace("\r", "\n");
 
+  // Normalize iPhone smart punctuation
+  msg.replace("’", "'");
+  msg.replace("‘", "'");
+  msg.replace("“", "\"");
+  msg.replace("”", "\"");
+
   std::vector<TextLine> lines;
 
   String size = "med";   // default text size
   bool red = false;
+  bool redBox = false;
 
   TextLine currentLine;
   currentLine.width = 0;
@@ -132,9 +154,10 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 
     int tokenWidth = textWidth(token, size);
     int spaceWidth = textWidth(" ", size);
+    int boxExtra = redBox ? 10 : 0;
 
     bool needsSpace = currentLine.segments.size() > 0;
-    int addedWidth = tokenWidth + (needsSpace ? spaceWidth : 0);
+    int addedWidth = tokenWidth + boxExtra + (needsSpace ? spaceWidth : 0);
 
     if (needsSpace && currentLine.width + addedWidth > maxWidth) {
       lines.push_back(currentLine);
@@ -146,10 +169,10 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
     }
 
     if (needsSpace) {
-      addSegmentToLine(currentLine, " ", size, red);
+      addSegmentToLine(currentLine, " ", size, false, false);
     }
 
-    addSegmentToLine(currentLine, token, size, red);
+    addSegmentToLine(currentLine, token, size, red, redBox);
     token = "";
   };
 
@@ -213,6 +236,20 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
       continue;
     }
 
+    if (msg.substring(i).startsWith("{{")) {
+      flushToken();
+      redBox = true;
+      i += 1;
+      continue;
+    }
+
+    if (msg.substring(i).startsWith("}}")) {
+      flushToken();
+      redBox = false;
+      i += 1;
+      continue;
+    }
+
     char c = msg[i];
 
     if (c == '{') {
@@ -265,8 +302,7 @@ void drawMessage(String msg) {
       }
     }
 
-    // GFX cursor y is a baseline, not the top of the text.
-    // This shifts the calculated block downward so it visually centers.
+    // GFX cursor y is a baseline, not top of text.
     int y = ((display.height() - totalHeight) / 2) + baselineOffsetForSize(firstLineSize);
 
     for (auto &line : lines) {
@@ -275,11 +311,36 @@ void drawMessage(String msg) {
       for (auto &seg : line.segments) {
         setFontBySize(seg.size);
 
-        display.setTextColor(seg.red ? GxEPD_RED : GxEPD_BLACK);
+        int segWidth = textWidth(seg.text, seg.size);
+
+        if (seg.text == " ") {
+          x += segWidth;
+          continue;
+        }
+
+        if (seg.redBox) {
+          int padX = 5;
+          int padY = 3;
+          int boxHeight = lineHeightForSize(seg.size);
+
+          display.fillRoundRect(
+            x - padX,
+            y - baselineOffsetForSize(seg.size) - padY,
+            segWidth + padX * 2,
+            boxHeight + padY * 2,
+            4,
+            GxEPD_RED
+          );
+
+          display.setTextColor(GxEPD_WHITE);
+        } else {
+          display.setTextColor(seg.red ? GxEPD_RED : GxEPD_BLACK);
+        }
+
         display.setCursor(x, y);
         display.print(seg.text);
 
-        x += textWidth(seg.text, seg.size);
+        x += segWidth + (seg.redBox ? 10 : 0);
       }
 
       y += line.height;
@@ -343,7 +404,7 @@ void setup() {
   SPI.begin(PIN_SPI_SCK, -1, PIN_SPI_MOSI, PIN_EPD_CS);
 
   display.init(115200);
-  drawMessage("Starting {BLE}...");
+  drawMessage("Starting {{BLE}}...");
 
   BLEDevice::init("ESP32-EINK-MSG");
 
@@ -370,7 +431,7 @@ void setup() {
 
   Serial.println("BLE advertising as ESP32-EINK-MSG");
 
-  pendingMessage = "{BLE ready}";
+  pendingMessage = "{{BLE ready}}";
   hasPendingMessage = true;
 }
 
