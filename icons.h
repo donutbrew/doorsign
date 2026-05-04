@@ -49,28 +49,10 @@ void drawNoSymbol(int cx, int cy, int r) {
 }
 
 void drawMeeting(int cx, int cy, int r) {
-  // Red telephone handset, stylized as a chunky diagonal receiver
-  int x0 = cx - r + 2;
-  int y0 = cy + r / 3;
-  int x1 = cx + r - 2;
-  int y1 = cy - r / 3;
+  int x = cx - PHONE_ICON_W / 2;
+  int y = cy - PHONE_ICON_H / 2;
 
-  // main diagonal body
-  drawThickLine(x0, y0, x1, y1, max(7, r / 3), GxEPD_RED);
-
-  // larger handset ends
-  display.fillRoundRect(x0 - r / 5, y0 - r / 4, r / 2, r / 2, 5, GxEPD_RED);
-  display.fillRoundRect(x1 - r / 3, y1 - r / 4, r / 2, r / 2, 5, GxEPD_RED);
-
-  // carve a small white inner gap to make it read less like a blob
-  drawThickLine(
-    cx - r / 3,
-    cy + r / 9,
-    cx + r / 3,
-    cy - r / 9,
-    3,
-    GxEPD_WHITE
-  );
+  display.drawBitmap(x, y, phone_icon_56x56, PHONE_ICON_W, PHONE_ICON_H, GxEPD_RED);
 }
 
 void drawSoon(int cx, int cy, int r) {
@@ -85,44 +67,45 @@ void drawSoon(int cx, int cy, int r) {
 }
 
 void drawOut(int cx, int cy, int r) {
-  // Very thick red diagonal arrow pointing upper-left
-  int tailX = cx + r;
-  int tailY = cy + r;
-  int headX = cx - r;
-  int headY = cy - r;
+  uint16_t color = GxEPD_RED;
 
-  drawThickLine(tailX, tailY, headX + r / 3, headY + r / 3, max(8, r / 3), GxEPD_RED);
+  // Big dominant triangle (pointing upper-left)
+  int tipX = cx - r;
+  int tipY = cy - r;
 
-  // arrow head
+  int baseRightX = cx + r ;
+  int baseRightY = cy - r / 4;
+
+  int baseBottomX = cx - r / 4;
+  int baseBottomY = cy + r ;
+
   display.fillTriangle(
-    headX, headY,
-    headX + r, headY + r / 5,
-    headX + r / 5, headY + r,
-    GxEPD_RED
+    tipX, tipY,
+    baseRightX, baseRightY,
+    baseBottomX, baseBottomY,
+    color
+  );
+
+  // Short thick tail (just to suggest direction)
+  int tailStartX = cx + r / 2;
+  int tailStartY = cy + r / 2;
+
+  int tailEndX = cx - r / 6;
+  int tailEndY = cy - r / 6;
+
+  drawThickLine(
+    tailStartX, tailStartY,
+    tailEndX, tailEndY,
+    max(10, r / 3),
+    color
   );
 }
 
 void drawRemote(int cx, int cy, int r) {
-  // Chunky WiFi symbol: dot + three wedge-like arcs
+  int x = cx - WIFI_ICON_W / 2;
+  int y = cy - WIFI_ICON_H / 2;
 
-  int dotR = max(3, r / 8);
-  display.fillCircle(cx, cy + r / 2, dotR, GxEPD_BLACK);
-
-  // inner arc
-  drawThickLine(cx - r / 3, cy + r / 4, cx, cy, 4, GxEPD_BLACK);
-  drawThickLine(cx, cy, cx + r / 3, cy + r / 4, 4, GxEPD_BLACK);
-
-  // middle arc
-  drawThickLine(cx - (2 * r) / 3, cy, cx - r / 4, cy - r / 4, 4, GxEPD_BLACK);
-  drawThickLine(cx - r / 4, cy - r / 4, cx, cy - r / 3, 4, GxEPD_BLACK);
-  drawThickLine(cx, cy - r / 3, cx + r / 4, cy - r / 4, 4, GxEPD_BLACK);
-  drawThickLine(cx + r / 4, cy - r / 4, cx + (2 * r) / 3, cy, 4, GxEPD_BLACK);
-
-  // outer arc
-  drawThickLine(cx - r, cy - r / 4, cx - r / 2, cy - r / 2, 4, GxEPD_BLACK);
-  drawThickLine(cx - r / 2, cy - r / 2, cx, cy - (2 * r) / 3, 4, GxEPD_BLACK);
-  drawThickLine(cx, cy - (2 * r) / 3, cx + r / 2, cy - r / 2, 4, GxEPD_BLACK);
-  drawThickLine(cx + r / 2, cy - r / 2, cx + r, cy - r / 4, 4, GxEPD_BLACK);
+  display.drawBitmap(x, y, wifi_icon_56x56, WIFI_ICON_W, WIFI_ICON_H, GxEPD_BLACK);
 }
 
 void drawCranky(int cx, int cy, int r) {

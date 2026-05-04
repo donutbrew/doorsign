@@ -20,10 +20,15 @@
 #define PIN_SPI_SCK  4
 #define PIN_SPI_MOSI 3
 
+// ---------- Button ----------
+#define BUTTON_PIN 21
+#define NUM_PRESETS 3
+
 GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
   GxEPD2_213_Z98c(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY)
 );
 
+#include "bitmap_icons.h"
 #include "icons.h"
 #include "presets.h"
 
@@ -31,15 +36,15 @@ GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
 #define SERVICE_UUID        "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 
-// ---------- Presets ----------
-// String presets[] = {
-//   "ICON:available|[big]WT{F}[/big]\\n{{Clint's Office}}",
-//   "ICON:meeting|In a meeting\\nBack soon",
-//   "ICON:no|[big]{{Do not disturb}}[/big]"
-// };
-
+// ---------- State ----------
 String pendingMessage = "";
 bool hasPendingMessage = false;
+
+// Button-only selection state.
+// BLE behavior remains immediate and unchanged.
+int buttonSelectedPreset = 0;
+unsigned long lastButtonPressTime = 0;
+bool buttonSelectionPending = false;
 
 // ---------- Structs ----------
 struct Segment {
@@ -70,6 +75,7 @@ std::vector<TextLine> layoutText(String msg, int maxWidth);
 String shrinkMarkupSizes(String msg);
 ParsedMessage parseMessage(String msg);
 void drawMessage(String msg);
+void handleButton();
 
 // ---------- Text sizing ----------
 void setFontBySize(String size) {
@@ -426,6 +432,38 @@ void drawMessage(String msg) {
   display.hibernate();
 }
 
+// ---------- Button handling ----------
+// Button cycles presets, but waits briefly before refreshing.
+// BLE still redraws immediately.
+void handleButton() {
+  static bool wasPressed = false;
+
+  bool pressed = digitalRead(BUTTON_PIN) == LOW;
+
+  if (pressed && !wasPressed) {
+    unsigned long now = millis();
+
+    if (now - lastButtonPressTime > 180) {
+      buttonSelectedPreset = (buttonSelectedPreset + 1) % NUM_PRESETS;
+      buttonSelectionPending = true;
+      lastButtonPressTime = now;
+
+      Serial.println("Button selected preset: " + String(buttonSelectedPreset + 1));
+    }
+  }
+
+  wasPressed = pressed;
+
+  if (buttonSelectionPending && millis() - lastButtonPressTime > 600) {
+    buttonSelectionPending = false;
+
+    pendingMessage = presets[buttonSelectedPreset];
+    hasPendingMessage = true;
+
+    Serial.println("Button committed preset: " + String(buttonSelectedPreset + 1));
+  }
+}
+
 // ---------- BLE callback ----------
 class MessageCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *characteristic) {
@@ -438,23 +476,30 @@ class MessageCallback : public BLECharacteristicCallbacks {
 
     if (value == "1") {
       pendingMessage = presets[0];
+      buttonSelectedPreset = 0;
     } else if (value == "2") {
       pendingMessage = presets[1];
+      buttonSelectedPreset = 1;
     } else if (value == "3") {
       pendingMessage = presets[2];
+      buttonSelectedPreset = 2;
     } else if (value.startsWith("SET1:")) {
       presets[0] = value.substring(5);
       pendingMessage = presets[0];
+      buttonSelectedPreset = 0;
     } else if (value.startsWith("SET2:")) {
       presets[1] = value.substring(5);
       pendingMessage = presets[1];
+      buttonSelectedPreset = 1;
     } else if (value.startsWith("SET3:")) {
       presets[2] = value.substring(5);
       pendingMessage = presets[2];
+      buttonSelectedPreset = 2;
     } else {
       pendingMessage = value;
     }
 
+    // BLE behavior remains immediate.
     hasPendingMessage = true;
   }
 };
@@ -475,6 +520,8 @@ void setup() {
 
   Serial.println();
   Serial.println("===== ESP32-C3 E-PAPER BLE MESSENGER V2 BOOT =====");
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   SPI.begin(PIN_SPI_SCK, -1, PIN_SPI_MOSI, PIN_EPD_CS);
 
@@ -505,11 +552,14 @@ void setup() {
 
   Serial.println("BLE advertising as ESP32-EINK-MSG");
 
+  buttonSelectedPreset = 0;
   pendingMessage = presets[0];
   hasPendingMessage = true;
 }
 
 void loop() {
+  handleButton();
+
   if (hasPendingMessage) {
     hasPendingMessage = false;
 
@@ -519,5 +569,5 @@ void loop() {
     Serial.println("Display update finished.");
   }
 
-  delay(100);
+  delay(20);
 }
