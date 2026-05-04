@@ -20,7 +20,6 @@
 #define PIN_SPI_SCK  4
 #define PIN_SPI_MOSI 3
 
-// ---------- Display ----------
 GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
   GxEPD2_213_Z98c(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY)
 );
@@ -31,8 +30,8 @@ GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
 
 // ---------- Presets ----------
 String presets[] = {
-  "[big]Dinner[/big]\nis {ready}",
-  "Please come {downstairs}",
+  "[big]Dinner[/big]\\nis {ready}",
+  "Please come\\n{downstairs}",
   "[big]{Do not disturb}[/big]"
 };
 
@@ -77,6 +76,12 @@ int lineHeightForSize(String size) {
   return 18;
 }
 
+int baselineOffsetForSize(String size) {
+  if (size == "big") return 26;
+  if (size == "med") return 18;
+  return 14;
+}
+
 // ---------- Measure text ----------
 int textWidth(String text, String size) {
   setFontBySize(size);
@@ -106,6 +111,11 @@ void addSegmentToLine(TextLine &line, String text, String size, bool red) {
 
 // ---------- Layout rich wrapped text ----------
 std::vector<TextLine> layoutText(String msg, int maxWidth) {
+  // Allow typing literal \n or \r in nRF Connect
+  msg.replace("\\n", "\n");
+  msg.replace("\\r", "\n");
+  msg.replace("\r", "\n");
+
   std::vector<TextLine> lines;
 
   String size = "med";   // default text size
@@ -148,6 +158,11 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 
     if (currentLine.segments.size() > 0) {
       lines.push_back(currentLine);
+    } else {
+      TextLine blankLine;
+      blankLine.width = 0;
+      blankLine.height = lineHeightForSize(size);
+      lines.push_back(blankLine);
     }
 
     currentLine.segments.clear();
@@ -240,11 +255,19 @@ void drawMessage(String msg) {
     std::vector<TextLine> lines = layoutText(msg, maxWidth);
 
     int totalHeight = 0;
-    for (auto &line : lines) {
-      totalHeight += line.height;
+    String firstLineSize = "med";
+
+    for (int i = 0; i < lines.size(); i++) {
+      totalHeight += lines[i].height;
+
+      if (i == 0 && lines[i].segments.size() > 0) {
+        firstLineSize = lines[i].segments[0].size;
+      }
     }
 
-    int y = (display.height() - totalHeight) / 2;
+    // GFX cursor y is a baseline, not the top of the text.
+    // This shifts the calculated block downward so it visually centers.
+    int y = ((display.height() - totalHeight) / 2) + baselineOffsetForSize(firstLineSize);
 
     for (auto &line : lines) {
       int x = (display.width() - line.width) / 2;
