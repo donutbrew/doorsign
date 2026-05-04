@@ -16,7 +16,6 @@
 #define PIN_SPI_SCK  4
 #define PIN_SPI_MOSI 3
 
-// ---------- Display ----------
 GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
   GxEPD2_213_Z98c(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY)
 );
@@ -25,18 +24,69 @@ GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
 #define SERVICE_UUID        "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 
-// ---------- Preset messages ----------
+// ---------- Presets ----------
 String presets[] = {
-  "Dinner is ready",
-  "Please come downstairs",
-  "Do not disturb"
+  "Dinner is {ready}",
+  "Please come {downstairs}",
+  "{Do not disturb}"
 };
 
-// ---------- Pending display update ----------
 String pendingMessage = "";
 bool hasPendingMessage = false;
 
-// ---------- Draw message on e-paper ----------
+// ---------- Wrapped text with {red spans} ----------
+void printWrappedRichText(String msg, int x, int y, int maxWidth, int lineHeight) {
+  int cursorX = x;
+  int cursorY = y;
+  bool red = false;
+
+  display.setFont(&FreeMonoBold9pt7b);
+  display.setTextColor(GxEPD_BLACK);
+
+  String token = "";
+
+  for (int i = 0; i <= msg.length(); i++) {
+    char c = (i < msg.length()) ? msg[i] : ' ';
+
+    bool flush =
+      c == ' ' || c == '\n' || c == '{' || c == '}' || i == msg.length();
+
+    if (flush && token.length() > 0) {
+      int16_t tbx, tby;
+      uint16_t tbw, tbh;
+      display.getTextBounds(token, cursorX, cursorY, &tbx, &tby, &tbw, &tbh);
+
+      if (cursorX != x && cursorX + tbw > x + maxWidth) {
+        cursorX = x;
+        cursorY += lineHeight;
+      }
+
+      if (cursorY > display.height() - 8) return;
+
+      display.setTextColor(red ? GxEPD_RED : GxEPD_BLACK);
+      display.setCursor(cursorX, cursorY);
+      display.print(token);
+
+      cursorX += tbw + 8;
+      token = "";
+    }
+
+    if (c == '{') {
+      red = true;
+    } else if (c == '}') {
+      red = false;
+    } else if (c == '\n') {
+      cursorX = x;
+      cursorY += lineHeight;
+    } else if (c == ' ') {
+      // word separator already handled by cursorX spacing
+    } else if (i < msg.length()) {
+      token += c;
+    }
+  }
+}
+
+// ---------- Draw message ----------
 void drawMessage(String msg) {
   Serial.println("Drawing: " + msg);
 
@@ -46,25 +96,20 @@ void drawMessage(String msg) {
   do {
     display.fillScreen(GxEPD_WHITE);
 
-    display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeMonoBold9pt7b);
 
-    display.setCursor(10, 30);
+    display.setTextColor(GxEPD_BLACK);
+    display.setCursor(10, 22);
     display.print("Message:");
 
-    display.setCursor(10, 65);
-    display.print(msg);
-
-    display.setTextColor(GxEPD_RED);
-    display.setCursor(10, 105);
-    display.print("BLE ready");
+    printWrappedRichText(msg, 10, 52, display.width() - 20, 18);
 
   } while (display.nextPage());
 
   display.hibernate();
 }
 
-// ---------- BLE write callback ----------
+// ---------- BLE callback ----------
 class MessageCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *characteristic) {
     String value = characteristic->getValue().c_str();
@@ -80,6 +125,15 @@ class MessageCallback : public BLECharacteristicCallbacks {
       pendingMessage = presets[1];
     } else if (value == "3") {
       pendingMessage = presets[2];
+    } else if (value.startsWith("SET1:")) {
+      presets[0] = value.substring(5);
+      pendingMessage = presets[0];
+    } else if (value.startsWith("SET2:")) {
+      presets[1] = value.substring(5);
+      pendingMessage = presets[1];
+    } else if (value.startsWith("SET3:")) {
+      presets[2] = value.substring(5);
+      pendingMessage = presets[2];
     } else {
       pendingMessage = value;
     }
@@ -88,7 +142,7 @@ class MessageCallback : public BLECharacteristicCallbacks {
   }
 };
 
-// ---------- Restart advertising after disconnect ----------
+// ---------- Re-advertise after disconnect ----------
 class ServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer *server) {
     Serial.println("Client disconnected; restarting advertising");
@@ -105,14 +159,11 @@ void setup() {
   Serial.println();
   Serial.println("===== ESP32-C3 E-PAPER BLE MESSENGER BOOT =====");
 
-  // SPI for your custom wiring
   SPI.begin(PIN_SPI_SCK, -1, PIN_SPI_MOSI, PIN_EPD_CS);
 
-  // Initial display setup
   display.init(115200);
-  drawMessage("Starting BLE...");
+  drawMessage("Starting {BLE}...");
 
-  // BLE setup
   BLEDevice::init("ESP32-EINK-MSG");
 
   BLEServer *server = BLEDevice::createServer();
@@ -127,7 +178,7 @@ void setup() {
   );
 
   messageCharacteristic->setCallbacks(new MessageCallback());
-  messageCharacteristic->setValue("Send 1, 2, 3, or text");
+  messageCharacteristic->setValue("Send 1, 2, 3, SET1:text, or text");
 
   service->start();
 
@@ -138,7 +189,7 @@ void setup() {
 
   Serial.println("BLE advertising as ESP32-EINK-MSG");
 
-  pendingMessage = "BLE ready";
+  pendingMessage = "{BLE ready}";
   hasPendingMessage = true;
 }
 
@@ -147,12 +198,8 @@ void loop() {
     hasPendingMessage = false;
 
     Serial.println("Updating display from loop...");
-
-    // Important after hibernate
     display.init(115200);
-
     drawMessage(pendingMessage);
-
     Serial.println("Display update finished.");
   }
 
