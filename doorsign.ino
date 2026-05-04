@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <vector>
+#include <Preferences.h>
 
 #include <GxEPD2_3C.h>
 #include <Fonts/FreeSansBold9pt7b.h>
@@ -22,7 +23,8 @@
 
 // ---------- Button ----------
 #define BUTTON_PIN 21
-#define NUM_PRESETS 3
+
+Preferences prefs;
 
 GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
   GxEPD2_213_Z98c(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY)
@@ -40,8 +42,6 @@ GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
 String pendingMessage = "";
 bool hasPendingMessage = false;
 
-// Button-only selection state.
-// BLE behavior remains immediate and unchanged.
 int buttonSelectedPreset = 0;
 unsigned long lastButtonPressTime = 0;
 bool buttonSelectionPending = false;
@@ -65,27 +65,31 @@ struct ParsedMessage {
   String text;
 };
 
-// ---------- Prototypes ----------
-void setFontBySize(String size);
-int lineHeightForSize(String size);
-int baselineOffsetForSize(String size);
-int textWidth(String text, String size);
-void addSegmentToLine(TextLine &line, String text, String size, bool red, bool redBox);
-std::vector<TextLine> layoutText(String msg, int maxWidth);
-String shrinkMarkupSizes(String msg);
-ParsedMessage parseMessage(String msg);
-void drawMessage(String msg);
-void handleButton();
+// ---------- Preset persistence ----------
+void loadSavedPresets() {
+  presets[0] = prefs.getString("p1", presets[0]);
+  presets[1] = prefs.getString("p2", presets[1]);
+  presets[2] = prefs.getString("p3", presets[2]);
+
+  Serial.println("Loaded presets:");
+  Serial.println("1: " + presets[0]);
+  Serial.println("2: " + presets[1]);
+  Serial.println("3: " + presets[2]);
+}
+
+void savePreset(int index) {
+  if (index == 0) prefs.putString("p1", presets[0]);
+  if (index == 1) prefs.putString("p2", presets[1]);
+  if (index == 2) prefs.putString("p3", presets[2]);
+
+  Serial.println("Saved preset " + String(index + 1));
+}
 
 // ---------- Text sizing ----------
 void setFontBySize(String size) {
-  if (size == "big") {
-    display.setFont(&FreeSansBold18pt7b);
-  } else if (size == "med") {
-    display.setFont(&FreeSansBold12pt7b);
-  } else {
-    display.setFont(&FreeSansBold9pt7b);
-  }
+  if (size == "big") display.setFont(&FreeSansBold18pt7b);
+  else if (size == "med") display.setFont(&FreeSansBold12pt7b);
+  else display.setFont(&FreeSansBold9pt7b);
 }
 
 int lineHeightForSize(String size) {
@@ -142,7 +146,7 @@ ParsedMessage parseMessage(String msg) {
   return result;
 }
 
-// ---------- Layout helpers ----------
+// ---------- Layout ----------
 void addSegmentToLine(TextLine &line, String text, String size, bool red, bool redBox) {
   if (text.length() == 0) return;
 
@@ -199,16 +203,13 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 
     if (needsSpace && currentLine.width + addedWidth > maxWidth) {
       lines.push_back(currentLine);
-
       currentLine.segments.clear();
       currentLine.width = 0;
       currentLine.height = lineHeightForSize(size);
       needsSpace = false;
     }
 
-    if (needsSpace) {
-      addSegmentToLine(currentLine, " ", size, false, false);
-    }
+    if (needsSpace) addSegmentToLine(currentLine, " ", size, false, false);
 
     addSegmentToLine(currentLine, token, size, red, redBox);
     token = "";
@@ -233,77 +234,41 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 
   for (int i = 0; i < msg.length(); i++) {
     if (msg.substring(i).startsWith("[big]")) {
-      flushToken();
-      size = "big";
-      i += 4;
-      continue;
+      flushToken(); size = "big"; i += 4; continue;
     }
-
     if (msg.substring(i).startsWith("[/big]")) {
-      flushToken();
-      size = "med";
-      i += 5;
-      continue;
+      flushToken(); size = "med"; i += 5; continue;
     }
-
     if (msg.substring(i).startsWith("[med]")) {
-      flushToken();
-      size = "med";
-      i += 4;
-      continue;
+      flushToken(); size = "med"; i += 4; continue;
     }
-
     if (msg.substring(i).startsWith("[/med]")) {
-      flushToken();
-      size = "med";
-      i += 5;
-      continue;
+      flushToken(); size = "med"; i += 5; continue;
     }
-
     if (msg.substring(i).startsWith("[small]")) {
-      flushToken();
-      size = "small";
-      i += 6;
-      continue;
+      flushToken(); size = "small"; i += 6; continue;
     }
-
     if (msg.substring(i).startsWith("[/small]")) {
-      flushToken();
-      size = "med";
-      i += 7;
-      continue;
+      flushToken(); size = "med"; i += 7; continue;
     }
-
     if (msg.substring(i).startsWith("{{")) {
-      flushToken();
-      redBox = true;
-      i += 1;
-      continue;
+      flushToken(); redBox = true; i += 1; continue;
     }
-
     if (msg.substring(i).startsWith("}}")) {
-      flushToken();
-      redBox = false;
-      i += 1;
-      continue;
+      flushToken(); redBox = false; i += 1; continue;
     }
 
     char c = msg[i];
 
     if (c == '{') {
-      flushToken();
-      red = true;
+      flushToken(); red = true;
     } else if (c == '}') {
-      flushToken();
-      red = false;
+      flushToken(); red = false;
     } else if (c == '\n') {
       newLine();
     } else if (c == ' ') {
-      if (redBox) {
-        token += c;
-      } else {
-        flushToken();
-      }
+      if (redBox) token += c;
+      else flushToken();
     } else {
       token += c;
     }
@@ -311,9 +276,7 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 
   flushToken();
 
-  if (currentLine.segments.size() > 0) {
-    lines.push_back(currentLine);
-  }
+  if (currentLine.segments.size() > 0) lines.push_back(currentLine);
 
   return lines;
 }
@@ -351,9 +314,7 @@ void drawMessage(String msg) {
     std::vector<TextLine> lines = layoutText(parsed.text, textMaxWidth);
 
     int totalHeight = 0;
-    for (auto &line : lines) {
-      totalHeight += line.height;
-    }
+    for (auto &line : lines) totalHeight += line.height;
 
     if (totalHeight > display.height() - 4) {
       Serial.println("Message too tall; shrinking text.");
@@ -361,9 +322,7 @@ void drawMessage(String msg) {
       lines = layoutText(parsed.text, textMaxWidth);
 
       totalHeight = 0;
-      for (auto &line : lines) {
-        totalHeight += line.height;
-      }
+      for (auto &line : lines) totalHeight += line.height;
     }
 
     String firstLineSize = "med";
@@ -371,12 +330,9 @@ void drawMessage(String msg) {
       firstLineSize = lines[0].segments[0].size;
     }
 
-    int topY;
-    if (totalHeight > display.height() - 4) {
-      topY = 2;
-    } else {
-      topY = (display.height() - totalHeight) / 2;
-    }
+    int topY = (totalHeight > display.height() - 4)
+      ? 2
+      : (display.height() - totalHeight) / 2;
 
     int y = topY + baselineOffsetForSize(firstLineSize);
 
@@ -432,9 +388,7 @@ void drawMessage(String msg) {
   display.hibernate();
 }
 
-// ---------- Button handling ----------
-// Button cycles presets, but waits briefly before refreshing.
-// BLE still redraws immediately.
+// ---------- Button ----------
 void handleButton() {
   static bool wasPressed = false;
 
@@ -464,7 +418,7 @@ void handleButton() {
   }
 }
 
-// ---------- BLE callback ----------
+// ---------- BLE ----------
 class MessageCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *characteristic) {
     String value = characteristic->getValue().c_str();
@@ -485,26 +439,31 @@ class MessageCallback : public BLECharacteristicCallbacks {
       buttonSelectedPreset = 2;
     } else if (value.startsWith("SET1:")) {
       presets[0] = value.substring(5);
+      savePreset(0);
       pendingMessage = presets[0];
       buttonSelectedPreset = 0;
     } else if (value.startsWith("SET2:")) {
       presets[1] = value.substring(5);
+      savePreset(1);
       pendingMessage = presets[1];
       buttonSelectedPreset = 1;
     } else if (value.startsWith("SET3:")) {
       presets[2] = value.substring(5);
+      savePreset(2);
       pendingMessage = presets[2];
       buttonSelectedPreset = 2;
+    } else if (value == "RESETPRESETS") {
+      prefs.clear();
+      Serial.println("Cleared saved presets. Reboot to reload defaults.");
+      pendingMessage = "{{Presets reset}}";
     } else {
       pendingMessage = value;
     }
 
-    // BLE behavior remains immediate.
     hasPendingMessage = true;
   }
 };
 
-// ---------- BLE reconnect ----------
 class ServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer *server) {
     Serial.println("Client disconnected; restarting advertising");
@@ -522,6 +481,9 @@ void setup() {
   Serial.println("===== ESP32-C3 E-PAPER BLE MESSENGER V2 BOOT =====");
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  prefs.begin("doorsign", false);
+  loadSavedPresets();
 
   SPI.begin(PIN_SPI_SCK, -1, PIN_SPI_MOSI, PIN_EPD_CS);
 
