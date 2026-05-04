@@ -1,7 +1,11 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include <vector>
+
 #include <GxEPD2_3C.h>
 #include <Fonts/FreeMonoBold9pt7b.h>
+#include <Fonts/FreeMonoBold12pt7b.h>
+#include <Fonts/FreeMonoBold18pt7b.h>
 
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -16,6 +20,7 @@
 #define PIN_SPI_SCK  4
 #define PIN_SPI_MOSI 3
 
+// ---------- Display ----------
 GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
   GxEPD2_213_Z98c(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY)
 );
@@ -26,64 +31,192 @@ GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
 
 // ---------- Presets ----------
 String presets[] = {
-  "Dinner is {ready}",
+  "[big]Dinner[/big]\nis {ready}",
   "Please come {downstairs}",
-  "{Do not disturb}"
+  "[big]{Do not disturb}[/big]"
 };
 
 String pendingMessage = "";
 bool hasPendingMessage = false;
 
-// ---------- Wrapped text with {red spans} ----------
-void printWrappedRichText(String msg, int x, int y, int maxWidth, int lineHeight) {
-  int cursorX = x;
-  int cursorY = y;
+// ---------- Text sizing ----------
+void setFontBySize(String size) {
+  if (size == "big") {
+    display.setFont(&FreeMonoBold18pt7b);
+  } else if (size == "med") {
+    display.setFont(&FreeMonoBold12pt7b);
+  } else {
+    display.setFont(&FreeMonoBold9pt7b);
+  }
+}
+
+int lineHeightForSize(String size) {
+  if (size == "big") return 34;
+  if (size == "med") return 24;
+  return 18;
+}
+
+// ---------- Layout structs ----------
+struct Segment {
+  String text;
+  String size;
+  bool red;
+};
+
+struct Line {
+  std::vector<Segment> segments;
+  int width;
+  int height;
+};
+
+// ---------- Measure text ----------
+int textWidth(String text, String size) {
+  setFontBySize(size);
+
+  int16_t tbx, tby;
+  uint16_t tbw, tbh;
+  display.getTextBounds(text, 0, 0, &tbx, &tby, &tbw, &tbh);
+
+  return tbw;
+}
+
+// ---------- Add segment to line ----------
+void addSegmentToLine(Line &line, String text, String size, bool red) {
+  if (text.length() == 0) return;
+
+  int w = textWidth(text, size);
+
+  Segment s;
+  s.text = text;
+  s.size = size;
+  s.red = red;
+
+  line.segments.push_back(s);
+  line.width += w;
+  line.height = max(line.height, lineHeightForSize(size));
+}
+
+// ---------- Layout rich wrapped text ----------
+std::vector<Line> layoutText(String msg, int maxWidth) {
+  std::vector<Line> lines;
+
+  String size = "med";   // default size
   bool red = false;
 
-  display.setFont(&FreeMonoBold9pt7b);
-  display.setTextColor(GxEPD_BLACK);
+  Line currentLine;
+  currentLine.width = 0;
+  currentLine.height = lineHeightForSize(size);
 
   String token = "";
 
-  for (int i = 0; i <= msg.length(); i++) {
-    char c = (i < msg.length()) ? msg[i] : ' ';
+  auto flushToken = [&]() {
+    if (token.length() == 0) return;
 
-    bool flush =
-      c == ' ' || c == '\n' || c == '{' || c == '}' || i == msg.length();
+    String printable = token;
 
-    if (flush && token.length() > 0) {
-      int16_t tbx, tby;
-      uint16_t tbw, tbh;
-      display.getTextBounds(token, cursorX, cursorY, &tbx, &tby, &tbw, &tbh);
+    int tokenWidth = textWidth(printable, size);
+    int spaceWidth = textWidth(" ", size);
 
-      if (cursorX != x && cursorX + tbw > x + maxWidth) {
-        cursorX = x;
-        cursorY += lineHeight;
-      }
+    bool needsSpace = currentLine.segments.size() > 0;
+    int addedWidth = tokenWidth + (needsSpace ? spaceWidth : 0);
 
-      if (cursorY > display.height() - 8) return;
+    if (needsSpace && currentLine.width + addedWidth > maxWidth) {
+      lines.push_back(currentLine);
 
-      display.setTextColor(red ? GxEPD_RED : GxEPD_BLACK);
-      display.setCursor(cursorX, cursorY);
-      display.print(token);
-
-      cursorX += tbw + 8;
-      token = "";
+      currentLine.segments.clear();
+      currentLine.width = 0;
+      currentLine.height = lineHeightForSize(size);
+      needsSpace = false;
+      addedWidth = tokenWidth;
     }
 
+    if (needsSpace) {
+      addSegmentToLine(currentLine, " ", size, red);
+    }
+
+    addSegmentToLine(currentLine, printable, size, red);
+    token = "";
+  };
+
+  auto newLine = [&]() {
+    flushToken();
+
+    if (currentLine.segments.size() > 0) {
+      lines.push_back(currentLine);
+    }
+
+    currentLine.segments.clear();
+    currentLine.width = 0;
+    currentLine.height = lineHeightForSize(size);
+  };
+
+  for (int i = 0; i < msg.length(); i++) {
+    if (msg.substring(i).startsWith("[big]")) {
+      flushToken();
+      size = "big";
+      i += 4;
+      continue;
+    }
+
+    if (msg.substring(i).startsWith("[/big]")) {
+      flushToken();
+      size = "med";
+      i += 5;
+      continue;
+    }
+
+    if (msg.substring(i).startsWith("[med]")) {
+      flushToken();
+      size = "med";
+      i += 4;
+      continue;
+    }
+
+    if (msg.substring(i).startsWith("[/med]")) {
+      flushToken();
+      size = "med";
+      i += 5;
+      continue;
+    }
+
+    if (msg.substring(i).startsWith("[small]")) {
+      flushToken();
+      size = "small";
+      i += 6;
+      continue;
+    }
+
+    if (msg.substring(i).startsWith("[/small]")) {
+      flushToken();
+      size = "med";
+      i += 7;
+      continue;
+    }
+
+    char c = msg[i];
+
     if (c == '{') {
+      flushToken();
       red = true;
     } else if (c == '}') {
+      flushToken();
       red = false;
     } else if (c == '\n') {
-      cursorX = x;
-      cursorY += lineHeight;
+      newLine();
     } else if (c == ' ') {
-      // word separator already handled by cursorX spacing
-    } else if (i < msg.length()) {
+      flushToken();
+    } else {
       token += c;
     }
   }
+
+  flushToken();
+
+  if (currentLine.segments.size() > 0) {
+    lines.push_back(currentLine);
+  }
+
+  return lines;
 }
 
 // ---------- Draw message ----------
@@ -96,13 +229,33 @@ void drawMessage(String msg) {
   do {
     display.fillScreen(GxEPD_WHITE);
 
-    display.setFont(&FreeMonoBold9pt7b);
+    int margin = 10;
+    int maxWidth = display.width() - 2 * margin;
 
-    display.setTextColor(GxEPD_BLACK);
-    display.setCursor(10, 22);
-    display.print("Message:");
+    std::vector<Line> lines = layoutText(msg, maxWidth);
 
-    printWrappedRichText(msg, 10, 52, display.width() - 20, 18);
+    int totalHeight = 0;
+    for (auto &line : lines) {
+      totalHeight += line.height;
+    }
+
+    int y = (display.height() - totalHeight) / 2;
+
+    for (auto &line : lines) {
+      int x = (display.width() - line.width) / 2;
+
+      for (auto &seg : line.segments) {
+        setFontBySize(seg.size);
+
+        display.setTextColor(seg.red ? GxEPD_RED : GxEPD_BLACK);
+        display.setCursor(x, y);
+        display.print(seg.text);
+
+        x += textWidth(seg.text, seg.size);
+      }
+
+      y += line.height;
+    }
 
   } while (display.nextPage());
 
@@ -142,7 +295,7 @@ class MessageCallback : public BLECharacteristicCallbacks {
   }
 };
 
-// ---------- Re-advertise after disconnect ----------
+// ---------- BLE reconnect ----------
 class ServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer *server) {
     Serial.println("Client disconnected; restarting advertising");
