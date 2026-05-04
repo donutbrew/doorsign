@@ -39,6 +39,27 @@ String presets[] = {
 String pendingMessage = "";
 bool hasPendingMessage = false;
 
+// ---------- Text structs ----------
+struct Segment {
+  String text;
+  String size;
+  bool red;
+};
+
+struct TextLine {
+  std::vector<Segment> segments;
+  int width;
+  int height;
+};
+
+// ---------- Function prototypes ----------
+void setFontBySize(String size);
+int lineHeightForSize(String size);
+int textWidth(String text, String size);
+void addSegmentToLine(TextLine &line, String text, String size, bool red);
+std::vector<TextLine> layoutText(String msg, int maxWidth);
+void drawMessage(String msg);
+
 // ---------- Text sizing ----------
 void setFontBySize(String size) {
   if (size == "big") {
@@ -56,19 +77,6 @@ int lineHeightForSize(String size) {
   return 18;
 }
 
-// ---------- Layout structs ----------
-struct Segment {
-  String text;
-  String size;
-  bool red;
-};
-
-struct Line {
-  std::vector<Segment> segments;
-  int width;
-  int height;
-};
-
 // ---------- Measure text ----------
 int textWidth(String text, String size) {
   setFontBySize(size);
@@ -81,7 +89,7 @@ int textWidth(String text, String size) {
 }
 
 // ---------- Add segment to line ----------
-void addSegmentToLine(Line &line, String text, String size, bool red) {
+void addSegmentToLine(TextLine &line, String text, String size, bool red) {
   if (text.length() == 0) return;
 
   int w = textWidth(text, size);
@@ -97,13 +105,13 @@ void addSegmentToLine(Line &line, String text, String size, bool red) {
 }
 
 // ---------- Layout rich wrapped text ----------
-std::vector<Line> layoutText(String msg, int maxWidth) {
-  std::vector<Line> lines;
+std::vector<TextLine> layoutText(String msg, int maxWidth) {
+  std::vector<TextLine> lines;
 
-  String size = "med";   // default size
+  String size = "med";   // default text size
   bool red = false;
 
-  Line currentLine;
+  TextLine currentLine;
   currentLine.width = 0;
   currentLine.height = lineHeightForSize(size);
 
@@ -112,9 +120,7 @@ std::vector<Line> layoutText(String msg, int maxWidth) {
   auto flushToken = [&]() {
     if (token.length() == 0) return;
 
-    String printable = token;
-
-    int tokenWidth = textWidth(printable, size);
+    int tokenWidth = textWidth(token, size);
     int spaceWidth = textWidth(" ", size);
 
     bool needsSpace = currentLine.segments.size() > 0;
@@ -127,14 +133,13 @@ std::vector<Line> layoutText(String msg, int maxWidth) {
       currentLine.width = 0;
       currentLine.height = lineHeightForSize(size);
       needsSpace = false;
-      addedWidth = tokenWidth;
     }
 
     if (needsSpace) {
       addSegmentToLine(currentLine, " ", size, red);
     }
 
-    addSegmentToLine(currentLine, printable, size, red);
+    addSegmentToLine(currentLine, token, size, red);
     token = "";
   };
 
@@ -232,7 +237,7 @@ void drawMessage(String msg) {
     int margin = 10;
     int maxWidth = display.width() - 2 * margin;
 
-    std::vector<Line> lines = layoutText(msg, maxWidth);
+    std::vector<TextLine> lines = layoutText(msg, maxWidth);
 
     int totalHeight = 0;
     for (auto &line : lines) {
