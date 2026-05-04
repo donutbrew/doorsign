@@ -73,15 +73,25 @@ void setFontBySize(String size) {
 }
 
 int lineHeightForSize(String size) {
-  if (size == "big") return 36;
-  if (size == "med") return 26;
-  return 19;
+  setFontBySize(size);
+
+  int16_t tbx, tby;
+  uint16_t tbw, tbh;
+
+  display.getTextBounds("Ag", 0, 0, &tbx, &tby, &tbw, &tbh);
+
+  return tbh + 1;
 }
 
 int baselineOffsetForSize(String size) {
-  if (size == "big") return 27;
-  if (size == "med") return 19;
-  return 14;
+  setFontBySize(size);
+
+  int16_t tbx, tby;
+  uint16_t tbw, tbh;
+
+  display.getTextBounds("Ag", 0, 0, &tbx, &tby, &tbw, &tbh);
+
+  return -tby;
 }
 
 // ---------- Measure text ----------
@@ -126,12 +136,10 @@ void addSegmentToLine(TextLine &line, String text, String size, bool red, bool r
 
 // ---------- Layout rich wrapped text ----------
 std::vector<TextLine> layoutText(String msg, int maxWidth) {
-  // Allow typing literal \n or \r in nRF Connect
   msg.replace("\\n", "\n");
   msg.replace("\\r", "\n");
   msg.replace("\r", "\n");
 
-  // Normalize iPhone smart punctuation
   msg.replace("’", "'");
   msg.replace("‘", "'");
   msg.replace("“", "\"");
@@ -139,7 +147,7 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 
   std::vector<TextLine> lines;
 
-  String size = "med";   // default text size
+  String size = "med";
   bool red = false;
   bool redBox = false;
 
@@ -261,7 +269,11 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
     } else if (c == '\n') {
       newLine();
     } else if (c == ' ') {
-      flushToken();
+      if (redBox) {
+        token += c;
+      } else {
+        flushToken();
+      }
     } else {
       token += c;
     }
@@ -302,10 +314,10 @@ void drawMessage(String msg) {
       }
     }
 
-    // GFX cursor y is a baseline, not top of text.
-    int y = ((display.height() - totalHeight) / 2) + baselineOffsetForSize(firstLineSize);
-
+    int topY = max(2, (display.height() - totalHeight) / 2);
+    int y = topY + baselineOffsetForSize(firstLineSize);
     for (auto &line : lines) {
+      if (y > display.height() - 4) break;
       int x = (display.width() - line.width) / 2;
 
       for (auto &seg : line.segments) {
@@ -320,18 +332,20 @@ void drawMessage(String msg) {
 
         if (seg.redBox) {
           int padX = 5;
-          int padY = 3;
-          int boxHeight = lineHeightForSize(seg.size);
+          int padY = 4;
+          int16_t tbx, tby;
+          uint16_t tbw, tbh;
+
+          display.getTextBounds(seg.text, x, y, &tbx, &tby, &tbw, &tbh);
 
           display.fillRoundRect(
-            x - padX,
-            y - baselineOffsetForSize(seg.size) - padY,
-            segWidth + padX * 2,
-            boxHeight + padY * 2,
+            tbx - padX,
+            tby - padY,
+            tbw + padX * 2,
+            tbh + padY * 2,
             4,
             GxEPD_RED
           );
-
           display.setTextColor(GxEPD_WHITE);
         } else {
           display.setTextColor(seg.red ? GxEPD_RED : GxEPD_BLACK);
@@ -431,7 +445,7 @@ void setup() {
 
   Serial.println("BLE advertising as ESP32-EINK-MSG");
 
-  pendingMessage = "{{BLE ready}}";
+  pendingMessage = presets[0];
   hasPendingMessage = true;
 }
 
