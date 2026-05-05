@@ -7,19 +7,30 @@ const DEFAULTS = {
   characteristicUuid: "6e400002-b5a3-f393-e0a9-e50e24dcca9e",
 };
 
-const PRESET_LABELS = [
-  ["1", "Available"],
-  ["2", "Meeting"],
-  ["3", "Do Not Disturb"],
-  ["4", "Out"],
-  ["5", "Soon"],
-  ["6", "Teleworking"],
-  ["7", "Cranky"],
+const DEFAULT_PRESET_LABELS = [
+  "Available",
+  "Meeting",
+  "Do Not Disturb",
+  "Out",
+  "Soon",
+  "Teleworking",
+  "Cranky",
+];
+
+const TEMPLATES = [
+  ["Available", "available", "[big]Available[/big]\\n[small]Come on in[/small]"],
+  ["Meeting", "meeting", "[big]In a meeting[/big]\\n[small]Back soon[/small]"],
+  ["DND", "no", "[big]{{Do not disturb}}[/big]\\n[small]Working[/small]"],
+  ["Out", "out", "[big]Out[/big]\\n[small]Back later[/small]"],
+  ["Returning soon", "soon", "[big]Returning soon[/big]"],
+  ["Teleworking", "remote", "[big]Teleworking[/big]\\n[small]Available online[/small]"],
+  ["Cranky", "cranky", "[big]Cranky[/big]\\n[small]Proceed carefully[/small]"],
 ];
 
 const STORAGE_KEYS = {
   settings: "doorsign.settings.v1",
   history: "doorsign.customHistory.v1",
+  presetLabels: "doorsign.presetLabels.v1",
   lastDeviceId: "doorsign.lastDeviceId.v1",
   lastDeviceName: "doorsign.lastDeviceName.v1",
 };
@@ -30,16 +41,33 @@ let writeCharacteristic = null;
 
 const $ = (id) => document.getElementById(id);
 
-function loadSettings() {
+function readJson(key, fallback) {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORAGE_KEYS.settings) || "{}") };
+    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
   } catch {
-    return { ...DEFAULTS };
+    return fallback;
   }
 }
 
+function writeJson(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function loadSettings() {
+  return { ...DEFAULTS, ...readJson(STORAGE_KEYS.settings, {}) };
+}
+
 function saveSettings(settings) {
-  localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
+  writeJson(STORAGE_KEYS.settings, settings);
+}
+
+function loadPresetLabels() {
+  const labels = readJson(STORAGE_KEYS.presetLabels, DEFAULT_PRESET_LABELS);
+  return DEFAULT_PRESET_LABELS.map((fallback, i) => labels[i] || fallback);
+}
+
+function savePresetLabels(labels) {
+  writeJson(STORAGE_KEYS.presetLabels, labels.slice(0, 7));
 }
 
 function currentSettings() {
@@ -61,6 +89,21 @@ function setStatus(connected, text) {
   const pill = $("statusPill");
   pill.className = `status ${connected ? "connected" : "disconnected"}`;
   pill.textContent = text || (connected ? "Connected" : "Disconnected");
+}
+
+function setAction(text) {
+  $("lastAction").textContent = text;
+}
+
+function flashButton(button, text = "Sent ✓") {
+  if (!button) return;
+  const oldText = button.textContent;
+  button.textContent = text;
+  button.classList.add("sent");
+  setTimeout(() => {
+    button.textContent = oldText;
+    button.classList.remove("sent");
+  }, 1000);
 }
 
 function updateDeviceInfo() {
@@ -87,10 +130,12 @@ async function connectWithDevice(device) {
     writeCharacteristic = null;
     bleServer = null;
     setStatus(false, "Disconnected");
+    setAction("Disconnected.");
     updateDeviceInfo();
   });
 
   setStatus(false, "Connecting...");
+  setAction("Connecting to device...");
   updateDeviceInfo();
 
   bleServer = await bleDevice.gatt.connect();
@@ -98,6 +143,7 @@ async function connectWithDevice(device) {
   writeCharacteristic = await service.getCharacteristic(settings.characteristicUuid);
 
   setStatus(true, "Connected");
+  setAction("Connected.");
   updateDeviceInfo();
 }
 
@@ -154,11 +200,13 @@ function disconnect() {
   writeCharacteristic = null;
   bleServer = null;
   setStatus(false, "Disconnected");
+  setAction("Disconnected.");
   updateDeviceInfo();
 }
 
-async function writeValue(value) {
+async function writeValue(value, button = null) {
   if (!writeCharacteristic) {
+    setAction("Connecting before send...");
     await reconnectLast();
   }
 
@@ -166,19 +214,18 @@ async function writeValue(value) {
     throw new Error("Not connected.");
   }
 
+  setAction(`Sending: ${value}`);
   await writeCharacteristic.writeValue(new TextEncoder().encode(value));
+  setAction("Sent ✓");
+  flashButton(button);
 }
 
 function loadHistory() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.history) || "[]");
-  } catch {
-    return [];
-  }
+  return readJson(STORAGE_KEYS.history, []);
 }
 
 function saveHistory(history) {
-  localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(history.slice(0, 20)));
+  writeJson(STORAGE_KEYS.history, history.slice(0, 20));
 }
 
 function addHistory(message) {
@@ -222,18 +269,67 @@ function wrapSelection(textarea, before, after) {
 
 function renderPresetButtons() {
   const root = $("presetButtons");
+  const labels = loadPresetLabels();
   root.innerHTML = "";
 
-  PRESET_LABELS.forEach(([num, label]) => {
+  labels.forEach((label, i) => {
+    const num = String(i + 1);
     const btn = document.createElement("button");
     btn.className = "preset-button";
     btn.innerHTML = `Preset ${num}<span>${label}</span>`;
     btn.addEventListener("click", async () => {
       try {
-        await writeValue(num);
+        await writeValue(num, btn);
       } catch (err) {
         alert(`Could not send preset ${num}: ${err.message}`);
       }
+    });
+    root.appendChild(btn);
+  });
+
+  renderPresetLabelEditor();
+}
+
+function renderPresetLabelEditor() {
+  const root = $("presetLabelEditor");
+  const labels = loadPresetLabels();
+  root.innerHTML = "";
+
+  labels.forEach((label, i) => {
+    const row = document.createElement("div");
+    row.className = "label-editor-row";
+
+    const slot = document.createElement("strong");
+    slot.textContent = `Preset ${i + 1}`;
+
+    const input = document.createElement("input");
+    input.value = label;
+    input.addEventListener("input", () => {
+      const latest = loadPresetLabels();
+      latest[i] = input.value.trim() || DEFAULT_PRESET_LABELS[i];
+      savePresetLabels(latest);
+      renderPresetButtons();
+      $("presetLabelEditor").classList.remove("hidden");
+    });
+
+    row.append(slot, input);
+    root.appendChild(row);
+  });
+}
+
+function renderTemplates() {
+  const root = $("templateButtons");
+  root.innerHTML = "";
+
+  TEMPLATES.forEach(([label, icon, text]) => {
+    const btn = document.createElement("button");
+    btn.className = "template-button";
+    btn.innerHTML = `${label}<span>${icon ? "ICON:" + icon : "No icon"}</span>`;
+    btn.addEventListener("click", () => {
+      $("iconSelect").value = icon;
+      $("messageInput").value = text;
+      updatePreview();
+      $("messageInput").scrollIntoView({ behavior: "smooth", block: "center" });
     });
     root.appendChild(btn);
   });
@@ -261,7 +357,7 @@ function renderHistory() {
     sendBtn.textContent = "Send";
     sendBtn.addEventListener("click", async () => {
       try {
-        await writeValue(message);
+        await writeValue(message, sendBtn);
       } catch (err) {
         alert(`Could not send message: ${err.message}`);
       }
@@ -287,6 +383,35 @@ function renderHistory() {
   });
 }
 
+function exportBackup() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    settings: loadSettings(),
+    presetLabels: loadPresetLabels(),
+    history: loadHistory(),
+  };
+  $("backupText").value = JSON.stringify(payload, null, 2);
+}
+
+function importBackup() {
+  let payload;
+  try {
+    payload = JSON.parse($("backupText").value);
+  } catch {
+    alert("That does not look like valid JSON.");
+    return;
+  }
+
+  if (payload.settings) saveSettings({ ...DEFAULTS, ...payload.settings });
+  if (Array.isArray(payload.presetLabels)) savePresetLabels(payload.presetLabels);
+  if (Array.isArray(payload.history)) saveHistory(payload.history);
+
+  populateSettings();
+  renderPresetButtons();
+  renderHistory();
+  alert("Imported local app settings.");
+}
+
 function bindEvents() {
   $("connectBtn").addEventListener("click", () => connect().catch(err => alert(err.message)));
   $("reconnectBtn").addEventListener("click", () => reconnectLast().catch(err => alert(err.message)));
@@ -301,6 +426,10 @@ function bindEvents() {
     saveSettings(DEFAULTS);
     populateSettings();
     alert("Settings reset.");
+  });
+
+  $("editLabelsToggle").addEventListener("click", () => {
+    $("presetLabelEditor").classList.toggle("hidden");
   });
 
   $("messageInput").addEventListener("input", updatePreview);
@@ -320,7 +449,7 @@ function bindEvents() {
     updatePreview();
   });
 
-  $("sendCustomBtn").addEventListener("click", async () => {
+  $("sendCustomBtn").addEventListener("click", async (event) => {
     const message = buildMessage();
     if (!message) {
       alert("Write a message first.");
@@ -328,14 +457,14 @@ function bindEvents() {
     }
 
     try {
-      await writeValue(message);
+      await writeValue(message, event.currentTarget);
       addHistory(message);
     } catch (err) {
       alert(`Could not send message: ${err.message}`);
     }
   });
 
-  $("savePresetBtn").addEventListener("click", async () => {
+  $("savePresetBtn").addEventListener("click", async (event) => {
     const message = buildMessage();
     const slot = $("slotSelect").value;
 
@@ -345,10 +474,29 @@ function bindEvents() {
     }
 
     try {
-      await writeValue(`SET${slot}:${message}`);
+      await writeValue(`SET${slot}:${message}`, event.currentTarget);
       addHistory(message);
     } catch (err) {
       alert(`Could not save preset: ${err.message}`);
+    }
+  });
+
+  $("saveAndRecallBtn").addEventListener("click", async (event) => {
+    const message = buildMessage();
+    const slot = $("slotSelect").value;
+
+    if (!message) {
+      alert("Write a message first.");
+      return;
+    }
+
+    try {
+      await writeValue(`SET${slot}:${message}`, event.currentTarget);
+      await new Promise(resolve => setTimeout(resolve, 250));
+      await writeValue(slot, event.currentTarget);
+      addHistory(message);
+    } catch (err) {
+      alert(`Could not save and recall preset: ${err.message}`);
     }
   });
 
@@ -365,10 +513,13 @@ function bindEvents() {
     }
   });
 
-  $("resetPresetsBtn").addEventListener("click", async () => {
+  $("exportBtn").addEventListener("click", exportBackup);
+  $("importBtn").addEventListener("click", importBackup);
+
+  $("resetPresetsBtn").addEventListener("click", async (event) => {
     if (!confirm("Send RESETPRESETS to the ESP32?")) return;
     try {
-      await writeValue("RESETPRESETS");
+      await writeValue("RESETPRESETS", event.currentTarget);
     } catch (err) {
       alert(`Could not reset presets: ${err.message}`);
     }
@@ -378,6 +529,7 @@ function bindEvents() {
 function boot() {
   populateSettings();
   renderPresetButtons();
+  renderTemplates();
   renderHistory();
   bindEvents();
   updatePreview();

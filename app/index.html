@@ -24,6 +24,7 @@
         <button id="disconnectBtn">Disconnect</button>
       </div>
       <p id="deviceInfo" class="muted">No device connected.</p>
+      <p id="lastAction" class="muted">Ready.</p>
       <details>
         <summary>BLE settings</summary>
         <label>
@@ -46,8 +47,18 @@
     </section>
 
     <section class="card">
-      <h2>Recall Presets</h2>
+      <div class="section-title-row">
+        <h2>Recall Presets</h2>
+        <button id="editLabelsToggle">Edit Labels</button>
+      </div>
       <div id="presetButtons" class="preset-grid"></div>
+      <div id="presetLabelEditor" class="label-editor hidden"></div>
+    </section>
+
+    <section class="card">
+      <h2>Templates</h2>
+      <p class="muted">Load a starter message into the editor.</p>
+      <div id="templateButtons" class="template-grid"></div>
     </section>
 
     <section class="card">
@@ -90,7 +101,7 @@
         <button data-wrap="[small]|[/small]">Small</button>
         <button data-wrap="{|}">Red text</button>
         <button data-wrap="{{|}}">Red box</button>
-        <button id="newlineBtn">Insert \\n</button>
+        <button id="newlineBtn">Insert \n</button>
       </div>
 
       <textarea id="messageInput" rows="6" spellcheck="true"
@@ -104,6 +115,7 @@
       <div class="button-row">
         <button id="sendCustomBtn" class="primary">Send Custom</button>
         <button id="savePresetBtn">Save to Preset</button>
+        <button id="saveAndRecallBtn">Save + Recall</button>
         <button id="clearEditorBtn">Clear</button>
       </div>
     </section>
@@ -115,6 +127,16 @@
       <div class="button-row">
         <button id="clearHistoryBtn">Clear History</button>
       </div>
+    </section>
+
+    <section class="card">
+      <h2>Backup / Restore</h2>
+      <p class="muted">Exports this browser's local app settings, preset labels, and recent custom messages.</p>
+      <div class="button-row">
+        <button id="exportBtn">Export JSON</button>
+        <button id="importBtn">Import JSON</button>
+      </div>
+      <textarea id="backupText" rows="6" placeholder="Exported JSON appears here. Paste JSON here to import."></textarea>
     </section>
 
     <section class="card danger-zone">

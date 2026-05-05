@@ -16,7 +16,12 @@ Host these on GitHub Pages and open the site in Bluefy on iOS.
 - Sends preset recalls `1` through `7`
 - Sends custom messages
 - Saves presets with `SET1:` through `SET7:`
+- Save + Recall workflow
 - Stores the last 20 custom messages in browser `localStorage`
+- Editable local preset labels
+- Built-in templates
+- Export/import backup JSON
+- Clear send/connection feedback
 - Remembers BLE UUID settings and tries to reconnect to the last granted device when supported
 
 ## Notes
