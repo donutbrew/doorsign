@@ -27,21 +27,16 @@
       <p id="lastAction" class="muted">Ready.</p>
       <details>
         <summary>BLE settings</summary>
-        <label>
-          Device name prefix
-          <input id="devicePrefixInput" type="text" />
-        </label>
-        <label>
-          Service UUID
-          <input id="serviceUuidInput" type="text" />
-        </label>
-        <label>
-          Write characteristic UUID
-          <input id="characteristicUuidInput" type="text" />
-        </label>
+        <label>Device name prefix <input id="devicePrefixInput" type="text" /></label>
+        <label>Service UUID <input id="serviceUuidInput" type="text" /></label>
+        <label>Write characteristic UUID <input id="characteristicUuidInput" type="text" /></label>
+        <label>Icons characteristic UUID <input id="iconsUuidInput" type="text" /></label>
+        <label>Presets characteristic UUID <input id="presetsUuidInput" type="text" /></label>
+        <label>Status characteristic UUID <input id="statusUuidInput" type="text" /></label>
         <div class="button-row">
           <button id="saveSettingsBtn">Save Settings</button>
           <button id="resetSettingsBtn">Reset Settings</button>
+          <button id="refreshMetadataBtn">Refresh Device Metadata</button>
         </div>
       </details>
     </section>
@@ -49,8 +44,9 @@
     <section class="card">
       <div class="section-title-row">
         <h2>Recall Presets</h2>
-        <button id="editLabelsToggle">Edit Labels</button>
+        <button id="editLabelsToggle">Edit Local Labels</button>
       </div>
+      <p id="metadataNote" class="muted">Using local defaults until connected.</p>
       <div id="presetButtons" class="preset-grid"></div>
       <div id="presetLabelEditor" class="label-editor hidden"></div>
     </section>
@@ -67,31 +63,12 @@
       <div class="form-grid">
         <label>
           Icon
-          <select id="iconSelect">
-            <option value="">No icon</option>
-            <option value="available">Available / smiley</option>
-            <option value="meeting">Meeting / phone</option>
-            <option value="no">Do not disturb</option>
-            <option value="out">Out of office</option>
-            <option value="soon">Returning soon</option>
-            <option value="remote">Teleworking</option>
-            <option value="cranky">Cranky</option>
-            <option value="stop">Stop sign</option>
-            <option value="circle">Black circle</option>
-          </select>
+          <select id="iconSelect"></select>
         </label>
 
         <label>
           Save to preset slot
-          <select id="slotSelect">
-            <option value="1">Preset 1</option>
-            <option value="2">Preset 2</option>
-            <option value="3">Preset 3</option>
-            <option value="4">Preset 4</option>
-            <option value="5">Preset 5</option>
-            <option value="6">Preset 6</option>
-            <option value="7">Preset 7</option>
-          </select>
+          <select id="slotSelect"></select>
         </label>
       </div>
 
@@ -124,14 +101,12 @@
       <h2>Recent Custom Messages</h2>
       <p class="muted">Saved locally in this browser. Most recent 20.</p>
       <div id="historyList" class="history-list"></div>
-      <div class="button-row">
-        <button id="clearHistoryBtn">Clear History</button>
-      </div>
+      <div class="button-row"><button id="clearHistoryBtn">Clear History</button></div>
     </section>
 
     <section class="card">
       <h2>Backup / Restore</h2>
-      <p class="muted">Exports this browser's local app settings, preset labels, and recent custom messages.</p>
+      <p class="muted">Exports this browser's local app settings, fallback labels, and recent custom messages.</p>
       <div class="button-row">
         <button id="exportBtn">Export JSON</button>
         <button id="importBtn">Import JSON</button>
