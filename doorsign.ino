@@ -218,7 +218,12 @@ String cleanPresetLabel(String msg) {
 }
 
 String buildIconListString() {
-  return "available|meeting|no|out|soon|remote|cranky|stop|circle";
+  String out = "";
+  for (int i = 0; i < NUM_SUPPORTED_ICONS; i++) {
+    if (i > 0) out += "|";
+    out += SUPPORTED_ICONS[i];
+  }
+  return out;
 }
 
 String buildPresetListString() {
@@ -393,10 +398,13 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 }
 
 String shrinkMarkupSizes(String msg) {
-  msg.replace("[big]", "[med]");
-  msg.replace("[/big]", "[/med]");
+  // Use temporary placeholders so [big] doesn't cascade into [small] in the same pass.
+  msg.replace("[big]", "[__M__]");
+  msg.replace("[/big]", "[/__M__]");
   msg.replace("[med]", "[small]");
   msg.replace("[/med]", "[/small]");
+  msg.replace("[__M__]", "[med]");
+  msg.replace("[/__M__]", "[/med]");
   return msg;
 }
 
@@ -528,7 +536,8 @@ void goToSleep() {
   BLEDevice::deinit(true);
   delay(100);
 
-  esp_sleep_enable_ext0_wakeup((gpio_num_t)BUTTON_PIN, 0);
+  // ESP32-C3 uses gpio wakeup instead of ext0 (ext0 is original ESP32 only).
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
   delay(100);
 
   esp_deep_sleep_start();
@@ -722,7 +731,7 @@ void setupBLE() {
   advertising->addServiceUUID(SERVICE_UUID);
   advertising->setScanResponse(true);
   advertising->setMinPreferred(0x06);
-  advertising->setMinPreferred(0x12);
+  advertising->setMaxPreferred(0x12);
 
   BLEDevice::startAdvertising();
 
@@ -776,13 +785,17 @@ void loop() {
   if (hasPendingMessage) {
     hasPendingMessage = false;
 
-    Serial.println("Updating display from loop...");
-    display.init(115200);
-    drawMessage(pendingMessage);
-    saveLastMessage(pendingMessage);
-    lastDrawnMessage = pendingMessage;
-    refreshMetadataCharacteristics();
-    Serial.println("Display update finished.");
+    if (pendingMessage != lastDrawnMessage) {
+      Serial.println("Updating display from loop...");
+      display.init(115200);
+      drawMessage(pendingMessage);
+      saveLastMessage(pendingMessage);
+      lastDrawnMessage = pendingMessage;
+      refreshMetadataCharacteristics();
+      Serial.println("Display update finished.");
+    } else {
+      Serial.println("Message unchanged; skipping redraw.");
+    }
 
 #if ENABLE_DEEP_SLEEP
     awakeStartedAt = millis();

@@ -3,6 +3,12 @@
 
 // Uses global display object from doorsign.ino
 
+// Canonical list of supported icon names (used by drawIcon and buildIconListString).
+const char* const SUPPORTED_ICONS[] = {
+  "available", "meeting", "no", "out", "soon", "remote", "cranky", "stop", "circle"
+};
+const int NUM_SUPPORTED_ICONS = sizeof(SUPPORTED_ICONS) / sizeof(SUPPORTED_ICONS[0]);
+
 void drawThickCircle(int cx, int cy, int r, int thickness, uint16_t color) {
   for (int i = 0; i < thickness; i++) {
     display.drawCircle(cx, cy, r - i, color);
