@@ -30,3 +30,8 @@ Presets:
 ## Notes
 
 Safari/iOS does not support Web Bluetooth directly. Use Bluefy or another iOS browser with Web Bluetooth support.
+
+
+## Dark Mode
+
+This version includes a Light/Dark mode toggle in the header. The preference is saved in browser local storage and is included in the backup/export JSON.

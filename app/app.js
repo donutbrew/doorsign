@@ -54,6 +54,7 @@ const STORAGE_KEYS = {
   cachedPresets: "doorsign.cachedPresets.v2",
   lastDeviceId: "doorsign.lastDeviceId.v1",
   lastDeviceName: "doorsign.lastDeviceName.v1",
+  theme: "doorsign.theme.v1",
 };
 
 let bleDevice = null;
@@ -530,6 +531,7 @@ function exportBackup() {
     cachedIcons: activeIcons,
     cachedPresets: activePresets,
     history: loadHistory(),
+    theme: localStorage.getItem(STORAGE_KEYS.theme) || loadTheme(),
   };
   $("backupText").value = JSON.stringify(payload, null, 2);
 }
@@ -550,6 +552,7 @@ function importBackup() {
     writeJson(STORAGE_KEYS.cachedPresets, activePresets);
   }
   if (Array.isArray(payload.history)) saveHistory(payload.history);
+  if (payload.theme === "dark" || payload.theme === "light") applyTheme(payload.theme);
 
   populateSettings();
   renderIconSelect();
@@ -559,7 +562,38 @@ function importBackup() {
   alert("Imported local app settings.");
 }
 
+
+function applyTheme(theme) {
+  const chosen = theme === "dark" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", chosen);
+  localStorage.setItem(STORAGE_KEYS.theme, chosen);
+
+  const btn = $("themeToggle");
+  if (btn) {
+    btn.textContent = chosen === "dark" ? "Light mode" : "Dark mode";
+  }
+}
+
+function loadTheme() {
+  const saved = localStorage.getItem(STORAGE_KEYS.theme);
+  if (saved === "dark" || saved === "light") {
+    return saved;
+  }
+
+  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "dark";
+  }
+
+  return "light";
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") || "light";
+  applyTheme(current === "dark" ? "light" : "dark");
+}
+
 function bindEvents() {
+  $("themeToggle").addEventListener("click", toggleTheme);
   $("connectBtn").addEventListener("click", () => connect().catch(err => alert(err.message)));
   $("reconnectBtn").addEventListener("click", () => reconnectLast().catch(err => alert(err.message)));
   $("disconnectBtn").addEventListener("click", disconnect);
@@ -667,6 +701,7 @@ function bindEvents() {
 }
 
 function boot() {
+  applyTheme(loadTheme());
   populateSettings();
 
   activeIcons = readJson(STORAGE_KEYS.cachedIcons, DEFAULT_ICONS);

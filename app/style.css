@@ -144,3 +144,98 @@ summary { cursor: pointer; font-weight: 800; }
   .hero, .section-title-row { align-items: flex-start; flex-direction: column; }
   .history-item, .label-editor-row { grid-template-columns: 1fr; }
 }
+
+
+/* ---------- Theme support ---------- */
+:root {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #12100e;
+  --card: #1d1915;
+  --ink: #f3eadf;
+  --muted: #b9aa9b;
+  --border: #40372f;
+  --accent: #d04535;
+  --accent-dark: #ff6b57;
+  --good: #2f9b5f;
+  --shadow: rgba(0, 0, 0, 0.35);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.theme-toggle {
+  min-width: 110px;
+}
+
+html[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at top left, rgba(208, 69, 53, 0.12), transparent 32rem),
+    var(--bg);
+}
+
+html[data-theme="dark"] .card {
+  background: var(--card);
+}
+
+html[data-theme="dark"] button {
+  background: #2a241f;
+  color: var(--ink);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] button.primary {
+  background: var(--accent);
+  border-color: var(--accent-dark);
+  color: white;
+}
+
+html[data-theme="dark"] button.danger {
+  background: #8d1f1f;
+  border-color: #b33939;
+  color: white;
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] .preview-block,
+html[data-theme="dark"] .history-item {
+  background: #171411;
+  color: var(--ink);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder {
+  color: #8f8174;
+}
+
+html[data-theme="dark"] .preset-button span,
+html[data-theme="dark"] .template-button span,
+html[data-theme="dark"] .muted {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .status.connected {
+  background: var(--good);
+}
+
+html[data-theme="dark"] .status.disconnected {
+  background: #9f2d25;
+}
+
+@media (max-width: 560px) {
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
