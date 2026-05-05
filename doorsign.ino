@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <vector>
+#include <Preferences.h>
 
 #include <GxEPD2_3C.h>
 #include <Fonts/FreeSansBold9pt7b.h>
@@ -20,25 +21,32 @@
 #define PIN_SPI_SCK  4
 #define PIN_SPI_MOSI 3
 
+// ---------- Button ----------
+#define BUTTON_PIN 21
+
+Preferences prefs;
+
 GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
   GxEPD2_213_Z98c(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY)
 );
+
+#include "bitmap_icons.h"
+#include "icons.h"
+#include "presets.h"
 
 // ---------- BLE UUIDs ----------
 #define SERVICE_UUID        "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 
-// ---------- Presets ----------
-String presets[] = {
-  "[big]WT{F}[/big]\\n{{Clint's Office}}",
-  "Please come\\n{downstairs}",
-  "[big]{{Do not disturb}}[/big]"
-};
-
+// ---------- State ----------
 String pendingMessage = "";
 bool hasPendingMessage = false;
 
-// ---------- Text structs ----------
+int buttonSelectedPreset = 0;
+unsigned long lastButtonPressTime = 0;
+bool buttonSelectionPending = false;
+
+// ---------- Structs ----------
 struct Segment {
   String text;
   String size;
@@ -52,25 +60,36 @@ struct TextLine {
   int height;
 };
 
-// ---------- Function prototypes ----------
-void setFontBySize(String size);
-int lineHeightForSize(String size);
-int baselineOffsetForSize(String size);
-int textWidth(String text, String size);
-void addSegmentToLine(TextLine &line, String text, String size, bool red, bool redBox);
-std::vector<TextLine> layoutText(String msg, int maxWidth);
-String shrinkMarkupSizes(String msg);
-void drawMessage(String msg);
+struct ParsedMessage {
+  String icon;
+  String text;
+};
+
+// ---------- Preset persistence ----------
+void loadSavedPresets() {
+  presets[0] = prefs.getString("p1", presets[0]);
+  presets[1] = prefs.getString("p2", presets[1]);
+  presets[2] = prefs.getString("p3", presets[2]);
+
+  Serial.println("Loaded presets:");
+  Serial.println("1: " + presets[0]);
+  Serial.println("2: " + presets[1]);
+  Serial.println("3: " + presets[2]);
+}
+
+void savePreset(int index) {
+  if (index == 0) prefs.putString("p1", presets[0]);
+  if (index == 1) prefs.putString("p2", presets[1]);
+  if (index == 2) prefs.putString("p3", presets[2]);
+
+  Serial.println("Saved preset " + String(index + 1));
+}
 
 // ---------- Text sizing ----------
 void setFontBySize(String size) {
-  if (size == "big") {
-    display.setFont(&FreeSansBold18pt7b);
-  } else if (size == "med") {
-    display.setFont(&FreeSansBold12pt7b);
-  } else {
-    display.setFont(&FreeSansBold9pt7b);
-  }
+  if (size == "big") display.setFont(&FreeSansBold18pt7b);
+  else if (size == "med") display.setFont(&FreeSansBold12pt7b);
+  else display.setFont(&FreeSansBold9pt7b);
 }
 
 int lineHeightForSize(String size) {
@@ -78,10 +97,9 @@ int lineHeightForSize(String size) {
 
   int16_t tbx, tby;
   uint16_t tbw, tbh;
-
   display.getTextBounds("Ag", 0, 0, &tbx, &tby, &tbw, &tbh);
 
-  return tbh + 1;  // tighter line spacing
+  return tbh + 1;
 }
 
 int baselineOffsetForSize(String size) {
@@ -89,13 +107,11 @@ int baselineOffsetForSize(String size) {
 
   int16_t tbx, tby;
   uint16_t tbw, tbh;
-
   display.getTextBounds("Ag", 0, 0, &tbx, &tby, &tbw, &tbh);
 
   return -tby;
 }
 
-// ---------- Measure text ----------
 int textWidth(String text, String size) {
   if (text == " ") {
     if (size == "big") return 10;
@@ -112,7 +128,25 @@ int textWidth(String text, String size) {
   return tbw;
 }
 
-// ---------- Add segment ----------
+// ---------- Message parser ----------
+ParsedMessage parseMessage(String msg) {
+  ParsedMessage result;
+  result.icon = "none";
+  result.text = msg;
+
+  if (msg.startsWith("ICON:")) {
+    int pipe = msg.indexOf('|');
+    if (pipe > 5) {
+      result.icon = msg.substring(5, pipe);
+      result.text = msg.substring(pipe + 1);
+      result.icon.trim();
+    }
+  }
+
+  return result;
+}
+
+// ---------- Layout ----------
 void addSegmentToLine(TextLine &line, String text, String size, bool red, bool redBox) {
   if (text.length() == 0) return;
 
@@ -135,7 +169,6 @@ void addSegmentToLine(TextLine &line, String text, String size, bool red, bool r
   }
 }
 
-// ---------- Layout rich wrapped text ----------
 std::vector<TextLine> layoutText(String msg, int maxWidth) {
   msg.replace("\\n", "\n");
   msg.replace("\\r", "\n");
@@ -170,16 +203,13 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 
     if (needsSpace && currentLine.width + addedWidth > maxWidth) {
       lines.push_back(currentLine);
-
       currentLine.segments.clear();
       currentLine.width = 0;
       currentLine.height = lineHeightForSize(size);
       needsSpace = false;
     }
 
-    if (needsSpace) {
-      addSegmentToLine(currentLine, " ", size, false, false);
-    }
+    if (needsSpace) addSegmentToLine(currentLine, " ", size, false, false);
 
     addSegmentToLine(currentLine, token, size, red, redBox);
     token = "";
@@ -204,77 +234,41 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 
   for (int i = 0; i < msg.length(); i++) {
     if (msg.substring(i).startsWith("[big]")) {
-      flushToken();
-      size = "big";
-      i += 4;
-      continue;
+      flushToken(); size = "big"; i += 4; continue;
     }
-
     if (msg.substring(i).startsWith("[/big]")) {
-      flushToken();
-      size = "med";
-      i += 5;
-      continue;
+      flushToken(); size = "med"; i += 5; continue;
     }
-
     if (msg.substring(i).startsWith("[med]")) {
-      flushToken();
-      size = "med";
-      i += 4;
-      continue;
+      flushToken(); size = "med"; i += 4; continue;
     }
-
     if (msg.substring(i).startsWith("[/med]")) {
-      flushToken();
-      size = "med";
-      i += 5;
-      continue;
+      flushToken(); size = "med"; i += 5; continue;
     }
-
     if (msg.substring(i).startsWith("[small]")) {
-      flushToken();
-      size = "small";
-      i += 6;
-      continue;
+      flushToken(); size = "small"; i += 6; continue;
     }
-
     if (msg.substring(i).startsWith("[/small]")) {
-      flushToken();
-      size = "med";
-      i += 7;
-      continue;
+      flushToken(); size = "med"; i += 7; continue;
     }
-
     if (msg.substring(i).startsWith("{{")) {
-      flushToken();
-      redBox = true;
-      i += 1;
-      continue;
+      flushToken(); redBox = true; i += 1; continue;
     }
-
     if (msg.substring(i).startsWith("}}")) {
-      flushToken();
-      redBox = false;
-      i += 1;
-      continue;
+      flushToken(); redBox = false; i += 1; continue;
     }
 
     char c = msg[i];
 
     if (c == '{') {
-      flushToken();
-      red = true;
+      flushToken(); red = true;
     } else if (c == '}') {
-      flushToken();
-      red = false;
+      flushToken(); red = false;
     } else if (c == '\n') {
       newLine();
     } else if (c == ' ') {
-      if (redBox) {
-        token += c;   // preserve spaces inside {{ }}
-      } else {
-        flushToken();
-      }
+      if (redBox) token += c;
+      else flushToken();
     } else {
       token += c;
     }
@@ -282,21 +276,16 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 
   flushToken();
 
-  if (currentLine.segments.size() > 0) {
-    lines.push_back(currentLine);
-  }
+  if (currentLine.segments.size() > 0) lines.push_back(currentLine);
 
   return lines;
 }
 
-// ---------- Shrink formatting if message is too tall ----------
 String shrinkMarkupSizes(String msg) {
   msg.replace("[big]", "[med]");
   msg.replace("[/big]", "[/med]");
-
   msg.replace("[med]", "[small]");
   msg.replace("[/med]", "[/small]");
-
   return msg;
 }
 
@@ -304,32 +293,36 @@ String shrinkMarkupSizes(String msg) {
 void drawMessage(String msg) {
   Serial.println("Drawing: " + msg);
 
+  ParsedMessage parsed = parseMessage(msg);
+  bool hasIcon = parsed.icon != "none";
+
   display.setRotation(1);
 
   display.firstPage();
   do {
     display.fillScreen(GxEPD_WHITE);
 
-    int margin = 10;
-    int maxWidth = display.width() - 2 * margin;
+    int margin = 8;
+    int iconWidth = hasIcon ? display.width() / 4 : 0;
+    int textX = hasIcon ? iconWidth + margin : margin;
+    int textMaxWidth = display.width() - textX - margin;
 
-    std::vector<TextLine> lines = layoutText(msg, maxWidth);
-
-    int totalHeight = 0;
-    for (auto &line : lines) {
-      totalHeight += line.height;
+    if (hasIcon) {
+      drawIcon(parsed.icon, 0, 0, iconWidth, display.height());
     }
 
-    // Auto-shrink once if message is too tall
+    std::vector<TextLine> lines = layoutText(parsed.text, textMaxWidth);
+
+    int totalHeight = 0;
+    for (auto &line : lines) totalHeight += line.height;
+
     if (totalHeight > display.height() - 4) {
       Serial.println("Message too tall; shrinking text.");
-      msg = shrinkMarkupSizes(msg);
-      lines = layoutText(msg, maxWidth);
+      parsed.text = shrinkMarkupSizes(parsed.text);
+      lines = layoutText(parsed.text, textMaxWidth);
 
       totalHeight = 0;
-      for (auto &line : lines) {
-        totalHeight += line.height;
-      }
+      for (auto &line : lines) totalHeight += line.height;
     }
 
     String firstLineSize = "med";
@@ -337,20 +330,16 @@ void drawMessage(String msg) {
       firstLineSize = lines[0].segments[0].size;
     }
 
-    int topY;
+    int topY = (totalHeight > display.height() - 4)
+      ? 2
+      : (display.height() - totalHeight) / 2;
 
-    if (totalHeight > display.height() - 4) {
-      // Too tall to truly center; start near top so final wrapped lines fit.
-      topY = 2;
-    } else {
-      topY = (display.height() - totalHeight) / 2;
-    }
+    int y = topY + baselineOffsetForSize(firstLineSize);
 
-int y = topY + baselineOffsetForSize(firstLineSize);
     for (auto &line : lines) {
       if (y > display.height() + 12) break;
 
-      int x = (display.width() - line.width) / 2;
+      int x = textX + (textMaxWidth - line.width) / 2;
 
       for (auto &seg : line.segments) {
         setFontBySize(seg.size);
@@ -399,7 +388,37 @@ int y = topY + baselineOffsetForSize(firstLineSize);
   display.hibernate();
 }
 
-// ---------- BLE callback ----------
+// ---------- Button ----------
+void handleButton() {
+  static bool wasPressed = false;
+
+  bool pressed = digitalRead(BUTTON_PIN) == LOW;
+
+  if (pressed && !wasPressed) {
+    unsigned long now = millis();
+
+    if (now - lastButtonPressTime > 180) {
+      buttonSelectedPreset = (buttonSelectedPreset + 1) % NUM_PRESETS;
+      buttonSelectionPending = true;
+      lastButtonPressTime = now;
+
+      Serial.println("Button selected preset: " + String(buttonSelectedPreset + 1));
+    }
+  }
+
+  wasPressed = pressed;
+
+  if (buttonSelectionPending && millis() - lastButtonPressTime > 600) {
+    buttonSelectionPending = false;
+
+    pendingMessage = presets[buttonSelectedPreset];
+    hasPendingMessage = true;
+
+    Serial.println("Button committed preset: " + String(buttonSelectedPreset + 1));
+  }
+}
+
+// ---------- BLE ----------
 class MessageCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *characteristic) {
     String value = characteristic->getValue().c_str();
@@ -411,19 +430,32 @@ class MessageCallback : public BLECharacteristicCallbacks {
 
     if (value == "1") {
       pendingMessage = presets[0];
+      buttonSelectedPreset = 0;
     } else if (value == "2") {
       pendingMessage = presets[1];
+      buttonSelectedPreset = 1;
     } else if (value == "3") {
       pendingMessage = presets[2];
+      buttonSelectedPreset = 2;
     } else if (value.startsWith("SET1:")) {
       presets[0] = value.substring(5);
+      savePreset(0);
       pendingMessage = presets[0];
+      buttonSelectedPreset = 0;
     } else if (value.startsWith("SET2:")) {
       presets[1] = value.substring(5);
+      savePreset(1);
       pendingMessage = presets[1];
+      buttonSelectedPreset = 1;
     } else if (value.startsWith("SET3:")) {
       presets[2] = value.substring(5);
+      savePreset(2);
       pendingMessage = presets[2];
+      buttonSelectedPreset = 2;
+    } else if (value == "RESETPRESETS") {
+      prefs.clear();
+      Serial.println("Cleared saved presets. Reboot to reload defaults.");
+      pendingMessage = "{{Presets reset}}";
     } else {
       pendingMessage = value;
     }
@@ -432,7 +464,6 @@ class MessageCallback : public BLECharacteristicCallbacks {
   }
 };
 
-// ---------- BLE reconnect ----------
 class ServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer *server) {
     Serial.println("Client disconnected; restarting advertising");
@@ -447,7 +478,12 @@ void setup() {
   delay(1000);
 
   Serial.println();
-  Serial.println("===== ESP32-C3 E-PAPER BLE MESSENGER BOOT =====");
+  Serial.println("===== ESP32-C3 E-PAPER BLE MESSENGER V2 BOOT =====");
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  prefs.begin("doorsign", false);
+  loadSavedPresets();
 
   SPI.begin(PIN_SPI_SCK, -1, PIN_SPI_MOSI, PIN_EPD_CS);
 
@@ -478,12 +514,14 @@ void setup() {
 
   Serial.println("BLE advertising as ESP32-EINK-MSG");
 
-  // Show slot 1 on startup
+  buttonSelectedPreset = 0;
   pendingMessage = presets[0];
   hasPendingMessage = true;
 }
 
 void loop() {
+  handleButton();
+
   if (hasPendingMessage) {
     hasPendingMessage = false;
 
@@ -493,5 +531,5 @@ void loop() {
     Serial.println("Display update finished.");
   }
 
-  delay(100);
+  delay(20);
 }
