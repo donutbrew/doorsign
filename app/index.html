@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Door Sign BLE Remote</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="hero">
+      <div>
+        <h1>Door Sign</h1>
+        <p>BLE remote for the ESP32 e-ink office sign</p>
+      </div>
+      <div id="statusPill" class="status disconnected">Disconnected</div>
+    </header>
+
+    <section class="card connection">
+      <h2>Connection</h2>
+      <div class="button-row">
+        <button id="connectBtn" class="primary">Connect</button>
+        <button id="reconnectBtn">Reconnect Last</button>
+        <button id="disconnectBtn">Disconnect</button>
+      </div>
+      <p id="deviceInfo" class="muted">No device connected.</p>
+      <details>
+        <summary>BLE settings</summary>
+        <label>
+          Device name prefix
+          <input id="devicePrefixInput" type="text" />
+        </label>
+        <label>
+          Service UUID
+          <input id="serviceUuidInput" type="text" />
+        </label>
+        <label>
+          Write characteristic UUID
+          <input id="characteristicUuidInput" type="text" />
+        </label>
+        <div class="button-row">
+          <button id="saveSettingsBtn">Save Settings</button>
+          <button id="resetSettingsBtn">Reset Settings</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Recall Presets</h2>
+      <div id="presetButtons" class="preset-grid"></div>
+    </section>
+
+    <section class="card">
+      <h2>Create Custom Message</h2>
+
+      <div class="form-grid">
+        <label>
+          Icon
+          <select id="iconSelect">
+            <option value="">No icon</option>
+            <option value="available">Available / smiley</option>
+            <option value="meeting">Meeting / phone</option>
+            <option value="no">Do not disturb</option>
+            <option value="out">Out of office</option>
+            <option value="soon">Returning soon</option>
+            <option value="remote">Teleworking</option>
+            <option value="cranky">Cranky</option>
+            <option value="stop">Stop sign</option>
+            <option value="circle">Black circle</option>
+          </select>
+        </label>
+
+        <label>
+          Save to preset slot
+          <select id="slotSelect">
+            <option value="1">Preset 1</option>
+            <option value="2">Preset 2</option>
+            <option value="3">Preset 3</option>
+            <option value="4">Preset 4</option>
+            <option value="5">Preset 5</option>
+            <option value="6">Preset 6</option>
+            <option value="7">Preset 7</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="format-row">
+        <button data-wrap="[big]|[/big]">Big</button>
+        <button data-wrap="[med]|[/med]">Med</button>
+        <button data-wrap="[small]|[/small]">Small</button>
+        <button data-wrap="{|}">Red text</button>
+        <button data-wrap="{{|}}">Red box</button>
+        <button id="newlineBtn">Insert \\n</button>
+      </div>
+
+      <textarea id="messageInput" rows="6" spellcheck="true"
+        placeholder="[big]Available[/big]\n[small]Come on in[/small]"></textarea>
+
+      <div class="preview-block">
+        <h3>Will send</h3>
+        <pre id="messagePreview"></pre>
+      </div>
+
+      <div class="button-row">
+        <button id="sendCustomBtn" class="primary">Send Custom</button>
+        <button id="savePresetBtn">Save to Preset</button>
+        <button id="clearEditorBtn">Clear</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Recent Custom Messages</h2>
+      <p class="muted">Saved locally in this browser. Most recent 20.</p>
+      <div id="historyList" class="history-list"></div>
+      <div class="button-row">
+        <button id="clearHistoryBtn">Clear History</button>
+      </div>
+    </section>
+
+    <section class="card danger-zone">
+      <h2>Device Maintenance</h2>
+      <p class="muted">This clears presets saved on the ESP32 and lets firmware defaults reload after reboot.</p>
+      <button id="resetPresetsBtn" class="danger">Send RESETPRESETS</button>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
