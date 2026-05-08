@@ -1,6 +1,6 @@
-# Door Sign BLE Web App — Dynamic Metadata Version
+# Door Sign Web App
 
-Static Web Bluetooth control panel for the ESP32 e-ink door sign.
+Clean static web app for the ESP32 e-paper door sign.
 
 ## Files
 
@@ -8,30 +8,37 @@ Static Web Bluetooth control panel for the ESP32 e-ink door sign.
 - `style.css`
 - `app.js`
 
-Host these on GitHub Pages and open the site in Bluefy on iOS.
+Upload all three files to GitHub Pages.
 
-## New in this version
+## Features
 
-- Reads icon list from ESP32 characteristic `6E400003-...`
-- Reads preset slot/label list from ESP32 characteristic `6E400004-...`
-- Builds preset buttons and icon dropdown dynamically
-- Caches last-read icons/presets locally
-- Keeps local label overrides available
-- Still works with defaults before the device connects
+- BLE connect/reconnect/disconnect
+- Dynamic preset metadata from firmware
+- Dynamic icon metadata from firmware
+- Current display status from firmware
+- Scheduled message status from firmware
+- Dark mode
+- Message history
+- Preset save / recall
+- Manual `SHOWIN`
+- Calendar day schedule JSON with `defaultMessage`
+- Apply current message + next transition
+- Backup / restore
 
-## Delimited metadata format
+## Calendar schedule JSON
 
-Icons:
-`available|meeting|no|out|soon|remote|cranky|stop|circle`
-
-Presets:
-`1|Available|2|Meeting|3|Do not disturb`
-
-## Notes
-
-Safari/iOS does not support Web Bluetooth directly. Use Bluefy or another iOS browser with Web Bluetooth support.
-
-
-## Dark Mode
-
-This version includes a Light/Dark mode toggle in the header. The preference is saved in browser local storage and is included in the backup/export JSON.
+```json
+{
+  "date": "2026-05-08",
+  "timezone": "America/New_York",
+  "defaultMessage": "ICON:available|[big]Available[/big]\\n[small]Come on in[/small]",
+  "events": [
+    {
+      "title": "Meeting",
+      "start": "2026-05-08T10:00:00-04:00",
+      "end": "2026-05-08T10:30:00-04:00",
+      "message": "ICON:meeting|[big]In a meeting[/big]\\n[small]Back at 10:30[/small]"
+    }
+  ]
+}
+```
