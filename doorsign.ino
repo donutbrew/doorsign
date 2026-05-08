@@ -1,3 +1,34 @@
+/*
+  ESP32-C3 E-Paper BLE Door Sign
+
+  Requires these companion files in the same Arduino sketch folder:
+    - bitmap_icons.h
+    - icons.h
+    - presets.h
+
+  Features:
+    - BLE write command characteristic
+    - readable icon metadata characteristic
+    - readable/notify preset metadata characteristic
+    - readable/notify JSON status characteristic
+    - persisted presets
+    - persisted last displayed message
+    - optional icon column
+    - rich text formatting:
+        [big]...[/big]
+        [med]...[/med]
+        [small]...[/small]
+        {red text}
+        {{white text in red box}}
+        \n line breaks
+    - auto-shrink when text is too tall or too wide
+    - physical button preset cycling
+    - optional compile-time deep sleep mode
+    - relative scheduling:
+        SHOWIN:<minutes>:<message>
+        CANCELTIMER
+*/
+
 #include <Arduino.h>
 #include <SPI.h>
 #include <vector>
@@ -14,6 +45,8 @@
 #include <BLEUtils.h>
 
 // ---------- Power mode ----------
+// false = normal always-on BLE behavior
+// true  = button wake + BLE window + deep sleep
 #define ENABLE_DEEP_SLEEP false
 
 // Only used when ENABLE_DEEP_SLEEP is true
@@ -42,11 +75,11 @@ GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
 #include "presets.h"
 
 // ---------- BLE UUIDs ----------
-#define SERVICE_UUID                 "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
-#define WRITE_CHARACTERISTIC_UUID    "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
-#define ICONS_CHARACTERISTIC_UUID    "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
-#define PRESETS_CHARACTERISTIC_UUID  "6E400004-B5A3-F393-E0A9-E50E24DCCA9E"
-#define STATUS_CHARACTERISTIC_UUID   "6E400005-B5A3-F393-E0A9-E50E24DCCA9E"
+#define SERVICE_UUID                  "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define WRITE_CHARACTERISTIC_UUID     "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define ICONS_CHARACTERISTIC_UUID     "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+#define PRESETS_CHARACTERISTIC_UUID   "6E400004-B5A3-F393-E0A9-E50E24DCCA9E"
+#define STATUS_CHARACTERISTIC_UUID    "6E400005-B5A3-F393-E0A9-E50E24DCCA9E"
 
 BLECharacteristic *presetListCharacteristic = nullptr;
 BLECharacteristic *iconListCharacteristic = nullptr;
@@ -63,9 +96,16 @@ int buttonSelectedPreset = 0;
 unsigned long lastButtonPressTime = 0;
 bool buttonSelectionPending = false;
 
+// ---------- Relative scheduled message ----------
+bool scheduledMessageActive = false;
+String scheduledMessage = "";
+unsigned long scheduledDueMillis = 0;
+
 #if ENABLE_DEEP_SLEEP
 unsigned long awakeStartedAt = 0;
 bool skipFirstButtonPressAfterWake = true;
+bool sleepRequested = false;
+uint64_t requestedSleepUs = 0;
 #endif
 
 // ---------- Structs ----------
@@ -117,6 +157,31 @@ void savePreset(int index) {
 
   prefs.putString(presetKey(index).c_str(), presets[index]);
   Serial.println("Saved preset " + String(index + 1));
+}
+
+void saveScheduledMessage(String msg) {
+  prefs.putBool("schedActive", true);
+  prefs.putString("schedMsg", msg);
+}
+
+void clearScheduledMessage() {
+  scheduledMessageActive = false;
+  scheduledMessage = "";
+  scheduledDueMillis = 0;
+
+  prefs.putBool("schedActive", false);
+  prefs.remove("schedMsg");
+
+  Serial.println("Cleared scheduled message.");
+}
+
+bool loadScheduledMessageFromPrefs() {
+  if (!prefs.getBool("schedActive", false)) return false;
+
+  scheduledMessage = prefs.getString("schedMsg", "");
+  scheduledMessageActive = scheduledMessage.length() > 0;
+
+  return scheduledMessageActive;
 }
 
 // ---------- Text sizing ----------
@@ -202,6 +267,7 @@ String cleanPresetLabel(String msg) {
   text.replace("{", "");
   text.replace("}", "");
 
+  // Keep the metadata delimiter consistent and safe.
   text.replace("|", "/");
 
   while (text.indexOf("  ") >= 0) {
@@ -234,6 +300,34 @@ String buildPresetListString() {
   return out;
 }
 
+String jsonEscape(String s) {
+  String out = "";
+
+  for (int i = 0; i < s.length(); i++) {
+    char c = s[i];
+
+    if (c == '\\') out += "\\\\";
+    else if (c == '"') out += "\\\"";
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') out += "\\r";
+    else if (c == '\t') out += "\\t";
+    else out += c;
+  }
+
+  return out;
+}
+
+String buildStatusString() {
+  String status = "{";
+  status += "\"current\":\"" + jsonEscape(lastDrawnMessage) + "\"";
+  status += ",\"scheduledActive\":";
+  status += scheduledMessageActive ? "true" : "false";
+  status += ",\"scheduled\":\"" + jsonEscape(scheduledMessageActive ? scheduledMessage : "") + "\"";
+  status += "}";
+
+  return status;
+}
+
 void refreshMetadataCharacteristics() {
   if (iconListCharacteristic != nullptr) {
     iconListCharacteristic->setValue(buildIconListString().c_str());
@@ -249,7 +343,8 @@ void refreshMetadataCharacteristics() {
   }
 
   if (statusCharacteristic != nullptr) {
-    statusCharacteristic->setValue(pendingMessage.c_str());
+    String status = buildStatusString();
+    statusCharacteristic->setValue(status.c_str());
 
     if (bleClientConnected) {
       statusCharacteristic->notify();
@@ -519,9 +614,64 @@ void drawMessage(String msg) {
   display.hibernate();
 }
 
+// ---------- Scheduling ----------
+bool parseShowIn(String value, unsigned long &minutesOut, String &messageOut) {
+  if (!value.startsWith("SHOWIN:")) return false;
+
+  int firstColon = value.indexOf(':');
+  int secondColon = value.indexOf(':', firstColon + 1);
+
+  if (secondColon < 0) return false;
+
+  String minutesText = value.substring(firstColon + 1, secondColon);
+  minutesText.trim();
+
+  for (int i = 0; i < minutesText.length(); i++) {
+    if (!isDigit(minutesText[i])) return false;
+  }
+
+  unsigned long minutes = minutesText.toInt();
+  if (minutes == 0) return false;
+
+  minutesOut = minutes;
+  messageOut = value.substring(secondColon + 1);
+  messageOut.trim();
+
+  return messageOut.length() > 0;
+}
+
+void scheduleMessageInMinutes(unsigned long minutes, String msg) {
+  scheduledMessageActive = true;
+  scheduledMessage = msg;
+  scheduledDueMillis = millis() + (minutes * 60UL * 1000UL);
+
+  saveScheduledMessage(msg);
+
+  Serial.println("Scheduled message in " + String(minutes) + " minute(s): " + msg);
+  refreshMetadataCharacteristics();
+
+#if ENABLE_DEEP_SLEEP
+  sleepRequested = true;
+  requestedSleepUs = (uint64_t)minutes * 60ULL * 1000000ULL;
+#endif
+}
+
+void checkScheduledMessage() {
+  if (!scheduledMessageActive) return;
+
+  long remaining = (long)(scheduledDueMillis - millis());
+
+  if (remaining <= 0) {
+    Serial.println("Scheduled message due.");
+    pendingMessage = scheduledMessage;
+    clearScheduledMessage();
+    hasPendingMessage = true;
+  }
+}
+
 // ---------- Sleep ----------
 #if ENABLE_DEEP_SLEEP
-void goToSleep() {
+void goToSleep(uint64_t timerWakeUs = 0) {
   Serial.println("Entering deep sleep.");
   delay(100);
 
@@ -529,12 +679,21 @@ void goToSleep() {
   delay(100);
 
   esp_sleep_enable_ext0_wakeup((gpio_num_t)BUTTON_PIN, 0);
-  delay(100);
 
+  if (timerWakeUs > 0) {
+    Serial.println("Timer wake enabled.");
+    esp_sleep_enable_timer_wakeup(timerWakeUs);
+  }
+
+  delay(100);
   esp_deep_sleep_start();
 }
 
 void handleSleepTimer() {
+  if (sleepRequested) {
+    goToSleep(requestedSleepUs);
+  }
+
   if (millis() - awakeStartedAt > BLE_WAKE_WINDOW_MS) {
     goToSleep();
   }
@@ -573,6 +732,8 @@ void handleButton() {
 
   if (buttonSelectionPending && millis() - lastButtonPressTime > 600) {
     buttonSelectionPending = false;
+
+    clearScheduledMessage();
 
     pendingMessage = presets[buttonSelectedPreset];
     hasPendingMessage = true;
@@ -631,6 +792,22 @@ class MessageCallback : public BLECharacteristicCallbacks {
     int presetIndex = -1;
     String newPresetMessage = "";
 
+    unsigned long showInMinutes = 0;
+    String showInMessage = "";
+
+    if (parseShowIn(value, showInMinutes, showInMessage)) {
+      scheduleMessageInMinutes(showInMinutes, showInMessage);
+      return;
+    }
+
+    if (value == "CANCELTIMER") {
+      clearScheduledMessage();
+      refreshMetadataCharacteristics();
+      return;
+    }
+
+    clearScheduledMessage();
+
     if (parsePresetRecall(value, presetIndex)) {
       pendingMessage = presets[presetIndex];
       buttonSelectedPreset = presetIndex;
@@ -664,16 +841,29 @@ class ServerCallbacks : public BLEServerCallbacks {
 #if ENABLE_DEEP_SLEEP
     awakeStartedAt = millis();
 #endif
+
+    refreshMetadataCharacteristics();
   }
 
   void onDisconnect(BLEServer *server) {
     bleClientConnected = false;
     Serial.println("Client disconnected; restarting advertising");
+
+    delay(300);
+
+    BLEAdvertising *advertising = BLEDevice::getAdvertising();
+    advertising->addServiceUUID(SERVICE_UUID);
+    advertising->setScanResponse(true);
+    advertising->setMinPreferred(0x06);
+    advertising->setMinPreferred(0x12);
+
     BLEDevice::startAdvertising();
 
-#if ENABLE_DEEP_SLEEP
+    Serial.println("Advertising restarted");
+
+  #if ENABLE_DEEP_SLEEP
     awakeStartedAt = millis();
-#endif
+  #endif
   }
 };
 
@@ -695,7 +885,7 @@ void setupBLE() {
   );
 
   writeCharacteristic->setCallbacks(new MessageCallback());
-  writeCharacteristic->setValue("Send preset number, SETn:text, or custom text");
+  writeCharacteristic->setValue("Send preset number, SETn:text, SHOWIN:min:msg, CANCELTIMER, or custom text");
 
   iconListCharacteristic = service->createCharacteristic(
     ICONS_CHARACTERISTIC_UUID,
@@ -743,9 +933,13 @@ void setup() {
   awakeStartedAt = millis();
 
   esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
+
   if (wakeCause == ESP_SLEEP_WAKEUP_EXT0) {
     Serial.println("Woke from button press.");
     skipFirstButtonPressAfterWake = true;
+  } else if (wakeCause == ESP_SLEEP_WAKEUP_TIMER) {
+    Serial.println("Woke from timer.");
+    skipFirstButtonPressAfterWake = false;
   } else {
     Serial.println("Cold boot or reset.");
     skipFirstButtonPressAfterWake = false;
@@ -760,18 +954,40 @@ void setup() {
   loadSavedPresets();
 
   SPI.begin(PIN_SPI_SCK, -1, PIN_SPI_MOSI, PIN_EPD_CS);
-
   display.init(115200);
 
-  setupBLE();
+  lastDrawnMessage = loadLastMessage();
 
-  pendingMessage = loadLastMessage();
-  lastDrawnMessage = "";
+#if ENABLE_DEEP_SLEEP
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER && loadScheduledMessageFromPrefs()) {
+    Serial.println("Displaying scheduled message after timer wake.");
+    pendingMessage = scheduledMessage;
+    clearScheduledMessage();
+    hasPendingMessage = true;
+  } else {
+    pendingMessage = lastDrawnMessage;
+    hasPendingMessage = true;
+  }
+#else
+  if (loadScheduledMessageFromPrefs()) {
+    Serial.println("Found saved scheduled message, but no reliable remaining time after reset in always-on mode.");
+    clearScheduledMessage();
+  }
+
+  pendingMessage = lastDrawnMessage;
   hasPendingMessage = true;
+#endif
+
+  setupBLE();
+  refreshMetadataCharacteristics();
 }
 
 void loop() {
   handleButton();
+
+#if !ENABLE_DEEP_SLEEP
+  checkScheduledMessage();
+#endif
 
   if (hasPendingMessage) {
     hasPendingMessage = false;
@@ -779,9 +995,12 @@ void loop() {
     Serial.println("Updating display from loop...");
     display.init(115200);
     drawMessage(pendingMessage);
+
     saveLastMessage(pendingMessage);
     lastDrawnMessage = pendingMessage;
+
     refreshMetadataCharacteristics();
+
     Serial.println("Display update finished.");
 
 #if ENABLE_DEEP_SLEEP
