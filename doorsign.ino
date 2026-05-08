@@ -2,7 +2,6 @@
 #include <SPI.h>
 #include <vector>
 #include <Preferences.h>
-#include "esp_sleep.h"
 
 #include <GxEPD2_3C.h>
 #include <Fonts/FreeSansBold9pt7b.h>
@@ -12,12 +11,6 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
-
-// ---------- Power mode ----------
-#define ENABLE_DEEP_SLEEP false
-
-// Only used when ENABLE_DEEP_SLEEP is true
-#define BLE_WAKE_WINDOW_MS 60000
 
 // ---------- E-paper pins ----------
 #define PIN_EPD_CS   7
@@ -42,31 +35,16 @@ GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(
 #include "presets.h"
 
 // ---------- BLE UUIDs ----------
-#define SERVICE_UUID                 "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
-#define WRITE_CHARACTERISTIC_UUID    "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
-#define ICONS_CHARACTERISTIC_UUID    "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
-#define PRESETS_CHARACTERISTIC_UUID  "6E400004-B5A3-F393-E0A9-E50E24DCCA9E"
-#define STATUS_CHARACTERISTIC_UUID   "6E400005-B5A3-F393-E0A9-E50E24DCCA9E"
-
-BLECharacteristic *presetListCharacteristic = nullptr;
-BLECharacteristic *iconListCharacteristic = nullptr;
-BLECharacteristic *statusCharacteristic = nullptr;
-
-bool bleClientConnected = false;
+#define SERVICE_UUID        "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_UUID "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 
 // ---------- State ----------
 String pendingMessage = "";
 bool hasPendingMessage = false;
-String lastDrawnMessage = "";
 
 int buttonSelectedPreset = 0;
 unsigned long lastButtonPressTime = 0;
 bool buttonSelectionPending = false;
-
-#if ENABLE_DEEP_SLEEP
-unsigned long awakeStartedAt = 0;
-bool skipFirstButtonPressAfterWake = true;
-#endif
 
 // ---------- Structs ----------
 struct Segment {
@@ -87,35 +65,23 @@ struct ParsedMessage {
   String text;
 };
 
-// ---------- Persistence ----------
-String presetKey(int index) {
-  return "p" + String(index + 1);
-}
-
-void saveLastMessage(String msg) {
-  prefs.putString("lastMsg", msg);
-  Serial.println("Saved last displayed message.");
-}
-
-String loadLastMessage() {
-  return prefs.getString("lastMsg", presets[0]);
-}
-
+// ---------- Preset persistence ----------
 void loadSavedPresets() {
-  for (int i = 0; i < NUM_PRESETS; i++) {
-    presets[i] = prefs.getString(presetKey(i).c_str(), presets[i]);
-  }
+  presets[0] = prefs.getString("p1", presets[0]);
+  presets[1] = prefs.getString("p2", presets[1]);
+  presets[2] = prefs.getString("p3", presets[2]);
 
   Serial.println("Loaded presets:");
-  for (int i = 0; i < NUM_PRESETS; i++) {
-    Serial.println(String(i + 1) + ": " + presets[i]);
-  }
+  Serial.println("1: " + presets[0]);
+  Serial.println("2: " + presets[1]);
+  Serial.println("3: " + presets[2]);
 }
 
 void savePreset(int index) {
-  if (index < 0 || index >= NUM_PRESETS) return;
+  if (index == 0) prefs.putString("p1", presets[0]);
+  if (index == 1) prefs.putString("p2", presets[1]);
+  if (index == 2) prefs.putString("p3", presets[2]);
 
-  prefs.putString(presetKey(index).c_str(), presets[index]);
   Serial.println("Saved preset " + String(index + 1));
 }
 
@@ -178,88 +144,6 @@ ParsedMessage parseMessage(String msg) {
   }
 
   return result;
-}
-
-// ---------- Metadata helpers ----------
-String cleanPresetLabel(String msg) {
-  ParsedMessage parsed = parseMessage(msg);
-  String text = parsed.text;
-
-  text.replace("\\n", " ");
-  text.replace("\\r", " ");
-  text.replace("\n", " ");
-  text.replace("\r", " ");
-
-  text.replace("[big]", "");
-  text.replace("[/big]", "");
-  text.replace("[med]", "");
-  text.replace("[/med]", "");
-  text.replace("[small]", "");
-  text.replace("[/small]", "");
-
-  text.replace("{{", "");
-  text.replace("}}", "");
-  text.replace("{", "");
-  text.replace("}", "");
-
-  text.replace("|", "/");
-
-  while (text.indexOf("  ") >= 0) {
-    text.replace("  ", " ");
-  }
-
-  text.trim();
-
-  if (text.length() > 28) {
-    text = text.substring(0, 28);
-  }
-
-  return text;
-}
-
-String buildIconListString() {
-  String out = "";
-  for (int i = 0; i < NUM_SUPPORTED_ICONS; i++) {
-    if (i > 0) out += "|";
-    out += SUPPORTED_ICONS[i];
-  }
-  return out;
-}
-
-String buildPresetListString() {
-  String out = "";
-
-  for (int i = 0; i < NUM_PRESETS; i++) {
-    if (i > 0) out += "|";
-    out += String(i + 1);
-    out += "|";
-    out += cleanPresetLabel(presets[i]);
-  }
-
-  return out;
-}
-
-void refreshMetadataCharacteristics() {
-  if (iconListCharacteristic != nullptr) {
-    iconListCharacteristic->setValue(buildIconListString().c_str());
-  }
-
-  if (presetListCharacteristic != nullptr) {
-    String presetList = buildPresetListString();
-    presetListCharacteristic->setValue(presetList.c_str());
-
-    if (bleClientConnected) {
-      presetListCharacteristic->notify();
-    }
-  }
-
-  if (statusCharacteristic != nullptr) {
-    statusCharacteristic->setValue(pendingMessage.c_str());
-
-    if (bleClientConnected) {
-      statusCharacteristic->notify();
-    }
-  }
 }
 
 // ---------- Layout ----------
@@ -398,27 +282,11 @@ std::vector<TextLine> layoutText(String msg, int maxWidth) {
 }
 
 String shrinkMarkupSizes(String msg) {
-  // Use temporary placeholders so [big] doesn't cascade into [small] in the same pass.
-  msg.replace("[big]", "[__M__]");
-  msg.replace("[/big]", "[/__M__]");
+  msg.replace("[big]", "[med]");
+  msg.replace("[/big]", "[/med]");
   msg.replace("[med]", "[small]");
   msg.replace("[/med]", "[/small]");
-  msg.replace("[__M__]", "[med]");
-  msg.replace("[/__M__]", "[/med]");
   return msg;
-}
-
-int totalLinesHeight(std::vector<TextLine> &lines) {
-  int totalHeight = 0;
-  for (auto &line : lines) totalHeight += line.height;
-  return totalHeight;
-}
-
-bool anyLineTooWide(std::vector<TextLine> &lines, int maxWidth) {
-  for (auto &line : lines) {
-    if (line.width > maxWidth) return true;
-  }
-  return false;
 }
 
 // ---------- Draw message ----------
@@ -444,24 +312,17 @@ void drawMessage(String msg) {
     }
 
     std::vector<TextLine> lines = layoutText(parsed.text, textMaxWidth);
-    int totalHeight = totalLinesHeight(lines);
 
-    for (int shrinkPass = 0; shrinkPass < 2; shrinkPass++) {
-      bool tooTall = totalHeight > display.height() - 4;
-      bool tooWide = anyLineTooWide(lines, textMaxWidth);
+    int totalHeight = 0;
+    for (auto &line : lines) totalHeight += line.height;
 
-      if (!tooTall && !tooWide) break;
-
-      Serial.println(
-        String("Message too large; shrinking text. tooTall=") +
-        String(tooTall) +
-        " tooWide=" +
-        String(tooWide)
-      );
-
+    if (totalHeight > display.height() - 4) {
+      Serial.println("Message too tall; shrinking text.");
       parsed.text = shrinkMarkupSizes(parsed.text);
       lines = layoutText(parsed.text, textMaxWidth);
-      totalHeight = totalLinesHeight(lines);
+
+      totalHeight = 0;
+      for (auto &line : lines) totalHeight += line.height;
     }
 
     String firstLineSize = "med";
@@ -478,7 +339,7 @@ void drawMessage(String msg) {
     for (auto &line : lines) {
       if (y > display.height() + 12) break;
 
-      int x = textX + max(0, (textMaxWidth - line.width) / 2);
+      int x = textX + (textMaxWidth - line.width) / 2;
 
       for (auto &seg : line.segments) {
         setFontBySize(seg.size);
@@ -527,41 +388,8 @@ void drawMessage(String msg) {
   display.hibernate();
 }
 
-// ---------- Sleep ----------
-#if ENABLE_DEEP_SLEEP
-void goToSleep() {
-  Serial.println("Entering deep sleep.");
-  delay(100);
-
-  BLEDevice::deinit(true);
-  delay(100);
-
-  // ESP32-C3 uses gpio wakeup instead of ext0 (ext0 is original ESP32 only).
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
-  delay(100);
-
-  esp_deep_sleep_start();
-}
-
-void handleSleepTimer() {
-  if (millis() - awakeStartedAt > BLE_WAKE_WINDOW_MS) {
-    goToSleep();
-  }
-}
-#endif
-
 // ---------- Button ----------
 void handleButton() {
-#if ENABLE_DEEP_SLEEP
-  if (skipFirstButtonPressAfterWake) {
-    if (digitalRead(BUTTON_PIN) == HIGH) {
-      skipFirstButtonPressAfterWake = false;
-      Serial.println("Wake button released; button control enabled.");
-    }
-    return;
-  }
-#endif
-
   static bool wasPressed = false;
 
   bool pressed = digitalRead(BUTTON_PIN) == LOW;
@@ -591,39 +419,6 @@ void handleButton() {
 }
 
 // ---------- BLE ----------
-bool parsePresetRecall(String value, int &indexOut) {
-  value.trim();
-
-  for (int i = 0; i < value.length(); i++) {
-    if (!isDigit(value[i])) return false;
-  }
-
-  int slot = value.toInt();
-  if (slot < 1 || slot > NUM_PRESETS) return false;
-
-  indexOut = slot - 1;
-  return true;
-}
-
-bool parsePresetSet(String value, int &indexOut, String &messageOut) {
-  if (!value.startsWith("SET")) return false;
-
-  int colon = value.indexOf(':');
-  if (colon < 4) return false;
-
-  String slotText = value.substring(3, colon);
-  for (int i = 0; i < slotText.length(); i++) {
-    if (!isDigit(slotText[i])) return false;
-  }
-
-  int slot = slotText.toInt();
-  if (slot < 1 || slot > NUM_PRESETS) return false;
-
-  indexOut = slot - 1;
-  messageOut = value.substring(colon + 1);
-  return true;
-}
-
 class MessageCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *characteristic) {
     String value = characteristic->getValue().c_str();
@@ -631,31 +426,35 @@ class MessageCallback : public BLECharacteristicCallbacks {
 
     if (value.length() == 0) return;
 
-#if ENABLE_DEEP_SLEEP
-    awakeStartedAt = millis();
-#endif
-
     Serial.println("Received: " + value);
 
-    int presetIndex = -1;
-    String newPresetMessage = "";
-
-    if (parsePresetRecall(value, presetIndex)) {
-      pendingMessage = presets[presetIndex];
-      buttonSelectedPreset = presetIndex;
-    } else if (parsePresetSet(value, presetIndex, newPresetMessage)) {
-      presets[presetIndex] = newPresetMessage;
-      savePreset(presetIndex);
-      refreshMetadataCharacteristics();
-
-      pendingMessage = presets[presetIndex];
-      buttonSelectedPreset = presetIndex;
+    if (value == "1") {
+      pendingMessage = presets[0];
+      buttonSelectedPreset = 0;
+    } else if (value == "2") {
+      pendingMessage = presets[1];
+      buttonSelectedPreset = 1;
+    } else if (value == "3") {
+      pendingMessage = presets[2];
+      buttonSelectedPreset = 2;
+    } else if (value.startsWith("SET1:")) {
+      presets[0] = value.substring(5);
+      savePreset(0);
+      pendingMessage = presets[0];
+      buttonSelectedPreset = 0;
+    } else if (value.startsWith("SET2:")) {
+      presets[1] = value.substring(5);
+      savePreset(1);
+      pendingMessage = presets[1];
+      buttonSelectedPreset = 1;
+    } else if (value.startsWith("SET3:")) {
+      presets[2] = value.substring(5);
+      savePreset(2);
+      pendingMessage = presets[2];
+      buttonSelectedPreset = 2;
     } else if (value == "RESETPRESETS") {
       prefs.clear();
-      loadSavedPresets();
-      refreshMetadataCharacteristics();
-
-      Serial.println("Cleared saved presets and last message. Reboot to reload defaults.");
+      Serial.println("Cleared saved presets. Reboot to reload defaults.");
       pendingMessage = "{{Presets reset}}";
     } else {
       pendingMessage = value;
@@ -666,77 +465,11 @@ class MessageCallback : public BLECharacteristicCallbacks {
 };
 
 class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer *server) {
-    bleClientConnected = true;
-    Serial.println("Client connected");
-
-#if ENABLE_DEEP_SLEEP
-    awakeStartedAt = millis();
-#endif
-  }
-
   void onDisconnect(BLEServer *server) {
-    bleClientConnected = false;
     Serial.println("Client disconnected; restarting advertising");
     BLEDevice::startAdvertising();
-
-#if ENABLE_DEEP_SLEEP
-    awakeStartedAt = millis();
-#endif
   }
 };
-
-void setupBLE() {
-  BLEDevice::deinit(true);
-  delay(300);
-
-  BLEDevice::init("ESP32-EINK-MSG");
-
-  BLEServer *server = BLEDevice::createServer();
-  server->setCallbacks(new ServerCallbacks());
-
-  BLEService *service = server->createService(SERVICE_UUID);
-
-  BLECharacteristic *writeCharacteristic = service->createCharacteristic(
-    WRITE_CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_WRITE |
-    BLECharacteristic::PROPERTY_WRITE_NR
-  );
-
-  writeCharacteristic->setCallbacks(new MessageCallback());
-  writeCharacteristic->setValue("Send preset number, SETn:text, or custom text");
-
-  iconListCharacteristic = service->createCharacteristic(
-    ICONS_CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_READ
-  );
-
-  presetListCharacteristic = service->createCharacteristic(
-    PRESETS_CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-
-  statusCharacteristic = service->createCharacteristic(
-    STATUS_CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-
-  refreshMetadataCharacteristics();
-
-  service->start();
-
-  BLEAdvertising *advertising = BLEDevice::getAdvertising();
-  advertising->addServiceUUID(SERVICE_UUID);
-  advertising->setScanResponse(true);
-  advertising->setMinPreferred(0x06);
-  advertising->setMaxPreferred(0x12);
-
-  BLEDevice::startAdvertising();
-
-  Serial.println("BLE advertising as ESP32-EINK-MSG");
-}
 
 void setup() {
   delay(3000);
@@ -745,23 +478,7 @@ void setup() {
   delay(1000);
 
   Serial.println();
-  Serial.println("===== ESP32-C3 E-PAPER BLE MESSENGER BOOT =====");
-
-#if ENABLE_DEEP_SLEEP
-  Serial.println("Power mode: deep sleep enabled");
-  awakeStartedAt = millis();
-
-  esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
-  if (wakeCause == ESP_SLEEP_WAKEUP_EXT0) {
-    Serial.println("Woke from button press.");
-    skipFirstButtonPressAfterWake = true;
-  } else {
-    Serial.println("Cold boot or reset.");
-    skipFirstButtonPressAfterWake = false;
-  }
-#else
-  Serial.println("Power mode: always on");
-#endif
+  Serial.println("===== ESP32-C3 E-PAPER BLE MESSENGER V2 BOOT =====");
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
@@ -772,10 +489,33 @@ void setup() {
 
   display.init(115200);
 
-  setupBLE();
+  BLEDevice::init("ESP32-EINK-MSG");
 
-  pendingMessage = loadLastMessage();
-  lastDrawnMessage = "";
+  BLEServer *server = BLEDevice::createServer();
+  server->setCallbacks(new ServerCallbacks());
+
+  BLEService *service = server->createService(SERVICE_UUID);
+
+  BLECharacteristic *messageCharacteristic = service->createCharacteristic(
+    CHARACTERISTIC_UUID,
+    BLECharacteristic::PROPERTY_WRITE |
+    BLECharacteristic::PROPERTY_WRITE_NR
+  );
+
+  messageCharacteristic->setCallbacks(new MessageCallback());
+  messageCharacteristic->setValue("Send 1, 2, 3, SET1:text, or text");
+
+  service->start();
+
+  BLEAdvertising *advertising = BLEDevice::getAdvertising();
+  advertising->addServiceUUID(SERVICE_UUID);
+  advertising->setScanResponse(true);
+  advertising->start();
+
+  Serial.println("BLE advertising as ESP32-EINK-MSG");
+
+  buttonSelectedPreset = 0;
+  pendingMessage = presets[0];
   hasPendingMessage = true;
 }
 
@@ -785,26 +525,11 @@ void loop() {
   if (hasPendingMessage) {
     hasPendingMessage = false;
 
-    if (pendingMessage != lastDrawnMessage) {
-      Serial.println("Updating display from loop...");
-      display.init(115200);
-      drawMessage(pendingMessage);
-      saveLastMessage(pendingMessage);
-      lastDrawnMessage = pendingMessage;
-      refreshMetadataCharacteristics();
-      Serial.println("Display update finished.");
-    } else {
-      Serial.println("Message unchanged; skipping redraw.");
-    }
-
-#if ENABLE_DEEP_SLEEP
-    awakeStartedAt = millis();
-#endif
+    Serial.println("Updating display from loop...");
+    display.init(115200);
+    drawMessage(pendingMessage);
+    Serial.println("Display update finished.");
   }
-
-#if ENABLE_DEEP_SLEEP
-  handleSleepTimer();
-#endif
 
   delay(20);
 }

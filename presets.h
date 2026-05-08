@@ -8,7 +8,7 @@ String presets[] = {
 
   "ICON:meeting|[big]In a meeting[/big]\\n[small]Back later[/small]",
 
-  "ICON:no|[big]{{Do not\ndisturb}}[/big]\\n[small]Working[/small]",
+  "ICON:no|[big]{{Do not disturb}}[/big]\\n[small]Working[/small]",
 
   "ICON:out|[big]Out of office[/big]\\n[small]Back later[/small]",
 
