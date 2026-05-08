@@ -42,3 +42,12 @@ Upload all three files to GitHub Pages.
   ]
 }
 ```
+
+
+## Layout changes
+
+- Calendar Day Schedule is now lower in the app, closer to Backup / Restore.
+- The main message section now has an Action dropdown:
+  - Send now
+  - Schedule for later
+- Preset save tools are tucked under “Preset tools.”

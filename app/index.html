@@ -66,26 +66,6 @@
       </details>
     </section>
 
-    <section class="card">
-      <div class="section-title-row">
-        <h2>Calendar Day Schedule</h2>
-        <button id="loadExampleScheduleBtn">Load Example</button>
-      </div>
-
-      <p class="muted">
-        Paste JSON with a default message and events. The app computes the current state and schedules the next transition using SHOWIN.
-      </p>
-
-      <textarea id="calendarJsonInput" rows="9" placeholder='{"defaultMessage":"ICON:available|[big]Available[/big]","events":[...]}'></textarea>
-
-      <div class="button-row">
-        <button id="parseScheduleBtn">Parse Schedule</button>
-        <button id="applyScheduleNowBtn" class="primary">Apply Current + Next</button>
-        <button id="clearScheduleBtn">Clear Schedule</button>
-      </div>
-
-      <div id="scheduleSummary" class="schedule-summary muted">No schedule loaded.</div>
-    </section>
 
     <section class="card">
       <div class="section-title-row">
@@ -135,26 +115,40 @@
         <pre id="messagePreview"></pre>
       </div>
 
-      <div class="button-row">
-        <button id="sendCustomBtn" class="primary">Send Custom</button>
-        <button id="savePresetBtn">Save to Preset</button>
-        <button id="saveAndRecallBtn">Save + Recall</button>
-        <button id="scheduleBtn">Schedule</button>
-        <button id="cancelTimerBtn">Cancel Timer</button>
-        <button id="clearEditorBtn">Clear</button>
+      <div class="send-panel">
+        <div class="form-grid">
+          <label>
+            Action
+            <select id="sendModeSelect">
+              <option value="now">Send now</option>
+              <option value="later">Schedule for later</option>
+            </select>
+          </label>
+
+          <label id="showInMinutesLabel" class="hidden">
+            Show in minutes
+            <input id="showInMinutesInput" type="number" min="1" step="1" value="30" />
+          </label>
+        </div>
+
+        <p id="sendModeHelp" class="muted">
+          Send now updates the display immediately and cancels any scheduled message.
+        </p>
+
+        <div class="button-row">
+          <button id="sendCustomBtn" class="primary">Send</button>
+          <button id="cancelTimerBtn">Cancel Timer</button>
+          <button id="clearEditorBtn">Clear</button>
+        </div>
       </div>
 
       <details>
-        <summary>Manual schedule options</summary>
+        <summary>Preset tools</summary>
 
-        <label>
-          Show in minutes
-          <input id="showInMinutesInput" type="number" min="1" step="1" value="30" />
-        </label>
-
-        <p class="muted">
-          Sends <code>SHOWIN:minutes:message</code>. Any normal display update cancels the scheduled message.
-        </p>
+        <div class="button-row">
+          <button id="savePresetBtn">Save to Preset</button>
+          <button id="saveAndRecallBtn">Save + Recall</button>
+        </div>
       </details>
     </section>
 
@@ -163,6 +157,27 @@
       <p class="muted">Saved locally in this browser. Most recent 20.</p>
       <div id="historyList" class="history-list"></div>
       <div class="button-row"><button id="clearHistoryBtn">Clear History</button></div>
+    </section>
+
+    <section class="card">
+      <div class="section-title-row">
+        <h2>Calendar Day Schedule</h2>
+        <button id="loadExampleScheduleBtn">Load Example</button>
+      </div>
+
+      <p class="muted">
+        Paste JSON with a default message and events. The app computes the current state and schedules the next transition using SHOWIN.
+      </p>
+
+      <textarea id="calendarJsonInput" rows="9" placeholder='{"defaultMessage":"ICON:available|[big]Available[/big]","events":[...]}'></textarea>
+
+      <div class="button-row">
+        <button id="parseScheduleBtn">Parse Schedule</button>
+        <button id="applyScheduleNowBtn" class="primary">Apply Current + Next</button>
+        <button id="clearScheduleBtn">Clear Schedule</button>
+      </div>
+
+      <div id="scheduleSummary" class="schedule-summary muted">No schedule loaded.</div>
     </section>
 
     <section class="card">

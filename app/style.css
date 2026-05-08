@@ -403,3 +403,18 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ---------- Send mode panel ---------- */
+.send-panel {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+html[data-theme="dark"] .send-panel {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border);
+}

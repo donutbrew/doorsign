@@ -953,6 +953,48 @@ function importBackup() {
   alert("Imported local app settings.");
 }
 
+
+function updateSendModeUi() {
+  const mode = $("sendModeSelect").value;
+  const later = mode === "later";
+
+  $("showInMinutesLabel").classList.toggle("hidden", !later);
+
+  $("sendCustomBtn").textContent = later ? "Schedule Message" : "Send Now";
+
+  $("sendModeHelp").textContent = later
+    ? "Schedule for later sends SHOWIN. The current display stays unchanged until the timer fires."
+    : "Send now updates the display immediately and cancels any scheduled message.";
+}
+
+async function sendMessageUsingSelectedMode(button = null) {
+  const message = buildMessage();
+
+  if (!message) {
+    alert("Write a message first.");
+    return;
+  }
+
+  const mode = $("sendModeSelect").value;
+
+  if (mode === "later") {
+    const minutes = parseInt($("showInMinutesInput").value, 10);
+
+    if (!Number.isFinite(minutes) || minutes < 1) {
+      alert("Enter a valid number of minutes.");
+      return;
+    }
+
+    await writeValue(`SHOWIN:${minutes}:${message}`, button);
+    addHistory(message);
+    setTimeout(() => loadDeviceStatus().catch(console.warn), 700);
+    return;
+  }
+
+  await writeValue(message, button);
+  addHistory(message);
+}
+
 function bindEvents() {
   $("themeToggle").addEventListener("click", toggleTheme);
 
@@ -1014,6 +1056,7 @@ function bindEvents() {
 
   $("messageInput").addEventListener("input", updatePreview);
   $("iconSelect").addEventListener("change", updatePreview);
+  $("sendModeSelect").addEventListener("change", updateSendModeUi);
 
   document.querySelectorAll("[data-wrap]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1030,16 +1073,8 @@ function bindEvents() {
   });
 
   $("sendCustomBtn").addEventListener("click", async (event) => {
-    const message = buildMessage();
-
-    if (!message) {
-      alert("Write a message first.");
-      return;
-    }
-
     try {
-      await writeValue(message, event.currentTarget);
-      addHistory(message);
+      await sendMessageUsingSelectedMode(event.currentTarget);
     } catch (err) {
       alert(`Could not send message: ${err.message}`);
     }
@@ -1083,28 +1118,6 @@ function bindEvents() {
     }
   });
 
-  $("scheduleBtn").addEventListener("click", async (event) => {
-    const message = buildMessage();
-    const minutes = parseInt($("showInMinutesInput").value, 10);
-
-    if (!message) {
-      alert("Write a message first.");
-      return;
-    }
-
-    if (!Number.isFinite(minutes) || minutes < 1) {
-      alert("Enter a valid number of minutes.");
-      return;
-    }
-
-    try {
-      await writeValue(`SHOWIN:${minutes}:${message}`, event.currentTarget);
-      addHistory(message);
-      setTimeout(() => loadDeviceStatus().catch(console.warn), 700);
-    } catch (err) {
-      alert(`Could not schedule message: ${err.message}`);
-    }
-  });
 
   $("cancelTimerBtn").addEventListener("click", async (event) => {
     try {
@@ -1159,6 +1172,7 @@ function boot() {
   bindEvents();
 
   updatePreview();
+  updateSendModeUi();
   updateDeviceInfo();
   renderDeviceStatus({ current: "", scheduled: "" });
   loadStoredSchedule();
