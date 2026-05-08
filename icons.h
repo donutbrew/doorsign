@@ -3,6 +3,12 @@
 
 // Uses global display object from doorsign.ino
 
+// Canonical list of supported icon names (used by drawIcon and buildIconListString).
+const char* const SUPPORTED_ICONS[] = {
+  "available", "meeting", "no", "out", "soon", "remote", "cranky", "stop", "circle"
+};
+const int NUM_SUPPORTED_ICONS = sizeof(SUPPORTED_ICONS) / sizeof(SUPPORTED_ICONS[0]);
+
 void drawThickCircle(int cx, int cy, int r, int thickness, uint16_t color) {
   for (int i = 0; i < thickness; i++) {
     display.drawCircle(cx, cy, r - i, color);
@@ -34,20 +40,26 @@ void drawAvailable(int cx, int cy, int r) {
   drawThickLine(cx + r / 4, cy + r / 3, cx + r / 2, cy + r / 5, 2, GxEPD_BLACK);
 }
 
-void drawNoSymbol(int cx, int cy, int r) {
-  // Thick red no-symbol
-  drawThickCircle(cx, cy, r, 5, GxEPD_RED);
+// void drawNoSymbol(int cx, int cy, int r) {
+//   // Thick red no-symbol
+//   drawThickCircle(cx, cy, r, 5, GxEPD_RED);
 
-  drawThickLine(
-    cx - r + 6,
-    cy + r - 6,
-    cx + r - 6,
-    cy - r + 6,
-    5,
-    GxEPD_RED
-  );
+//   drawThickLine(
+//     cx - r + 6,
+//     cy + r - 6,
+//     cx + r - 6,
+//     cy - r + 6,
+//     5,
+//     GxEPD_RED
+//   );
+// }
+
+void drawNoSymbol(int cx, int cy, int size) {
+  int x = cx - NO_ICON_W / 2;
+  int y = cy - NO_ICON_H / 2;
+
+  display.drawBitmap(x, y, no_icon_56x56, NO_ICON_W, NO_ICON_H, GxEPD_RED);
 }
-
 void drawMeeting(int cx, int cy, int r) {
   int x = cx - PHONE_ICON_W / 2;
   int y = cy - PHONE_ICON_H / 2;

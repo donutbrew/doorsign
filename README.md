@@ -1,193 +1,188 @@
-# ESP32 BLE E-Ink Message Display (Version 1)
+# ESP32 E‑Paper Door Sign (BLE + Battery Mode)
+
+A Bluetooth-controlled e‑paper door sign powered by an ESP32‑C3 with optional battery-optimized deep sleep mode.
+
+---
+
+## ✨ Features
+
+### 📟 Display
+- Tri-color e‑paper (black / white / red)
+- Rich text formatting:
+  - `[big]`, `[med]`, `[small]`
+  - `{red text}`
+  - `{{red boxed text}}`
+  - `\n` line breaks
+- Auto layout:
+  - centers text
+  - wraps intelligently
+  - auto-shrinks if too large
 
-## Overview
+---
 
-A Bluetooth-controlled message display using an ESP32-C3 and a tri-color
-(black/white/red) e-paper screen. Messages are sent from a phone via BLE
-and rendered with rich text formatting including sizes, colors, and
-boxed highlights.
+### 🔵 BLE Control
+- Custom BLE service (UART-style)
+- Send messages from:
+  - Web app (Web Bluetooth / Bluefy)
+  - nRF Connect or similar apps
+- Commands:
+  - `1–N` → recall preset
+  - `SETn:<message>` → save preset
+  - `RESETPRESETS` → clear saved presets
 
-------------------------------------------------------------------------
+---
 
-## Hardware Requirements
+### 🧠 Smart Metadata (NEW)
+Device advertises:
+- available icons
+- preset labels
 
-### Core Components
+Used by the web app to dynamically build UI.
 
--   ESP32-C3 Zero (or compatible ESP32-C3 board)
--   WeAct 2.13" Tri-Color E-Paper Display (Black/White/Red, SPI)
+Format:
+```
+Icons: available|meeting|no|out|soon|remote|cranky
+Presets: 1|Available|2|Meeting|...
+```
+
+---
 
-### Optional
+### 🧾 Presets
+- Stored in flash (Preferences / NVS)
+- Configurable in `presets.h`
+- Now supports arbitrary number of slots (`NUM_PRESETS`)
+- Updated dynamically over BLE
 
--   Jumper wires (female-to-female)
--   Breadboard or soldered headers
+---
 
-------------------------------------------------------------------------
+### 🎨 Icons
+- Optional left-side icon area
+- Vector + bitmap support
+- Example icons:
+  - available (smiley)
+  - meeting (phone)
+  - no / do-not-disturb
+  - out of office
+  - telework (wifi)
+  - cranky (angry face)
 
-## Wiring (ESP32-C3 → E-Paper)
+---
 
-VCC → 3V3\
-GND → GND\
-SCL → GPIO 4\
-SDA → GPIO 3\
-CS → GPIO 7\
-DC → GPIO 2\
-RES → GPIO 1\
-BUSY → GPIO 10
+### 🖲 Button Control
+- Single button (GPIO21)
+- Cycles presets
+- Debounced and delayed commit
 
-Note: SCL = SPI Clock, SDA = MOSI
+---
 
-------------------------------------------------------------------------
+### 🔋 Power Modes (NEW)
 
-## Software Setup
+Controlled at compile time:
 
-### Arduino IDE
+```cpp
+#define ENABLE_DEEP_SLEEP false
+```
 
--   Install ESP32 board support
--   Select board: ESP32C3 Dev Module
+---
 
-### Libraries
+#### 🔌 Always-On Mode (default)
+- BLE always advertising
+- instant connection
+- higher power draw (~30–60mA)
 
-Install via Library Manager: - GxEPD2 - Adafruit GFX Library - ESP32 BLE
-Arduino
+---
 
-### Settings
+#### 🔋 Battery Mode
+```cpp
+#define ENABLE_DEEP_SLEEP true
+```
 
--   USB CDC On Boot: Enabled
--   Upload Speed: 115200+
--   Press RESET if display does not update after upload
+Behavior:
+- ESP sleeps most of the time
+- press button → wake device
+- BLE available for ~60 seconds
+- returns to deep sleep
 
-------------------------------------------------------------------------
+Benefits:
+- weeks to months battery life
+- screen retains image while powered off
 
-## BLE Usage
+---
 
-### Device Name
+### ⚡ Power Recommendations
 
-ESP32-EINK-MSG
+#### Best:
+- USB power (always-on mode)
 
-### UUIDs
+#### Battery:
+- 3×AA or 3×AAA (NiMH recommended)
+- add 100–470µF capacitor across 3.3V/GND
 
-Service: 6E400001-B5A3-F393-E0A9-E50E24DCCA9E\
-Characteristic: 6E400002-B5A3-F393-E0A9-E50E24DCCA9E
+---
 
-### Apps
+## 📱 Web App
 
--   nRF Connect (iOS/Android)
+- Hosted (e.g., GitHub Pages)
+- Uses Web Bluetooth
+- Features:
+  - dynamic presets/icons from device
+  - message editor + formatting tools
+  - history (last 20 messages)
+  - save/recall presets
+  - backup/restore
 
-### Sending Messages
+---
 
--   Connect to device
--   Find writable characteristic
--   Send UTF-8 text
+## 🔧 Wiring
 
-------------------------------------------------------------------------
+### Display (example)
+| Pin | ESP32 |
+|-----|------|
+| CS  | 7 |
+| DC  | 2 |
+| RST | 1 |
+| BUSY| 10 |
+| SCK | 4 |
+| MOSI| 3 |
 
-## Text Formatting
+---
 
-### Line Breaks
+### Button
+```
+GPIO21 ---- button ---- GND
+```
 
-Use: `\n`{=tex}
+Uses internal pull-up.
 
-Example: Dinner is ready`\nCome `{=tex}downstairs
+---
 
-------------------------------------------------------------------------
+## 🧪 Development Notes
 
-### Text Sizes
+- Uses GxEPD2 library
+- Uses BLEDevice (ESP-IDF/Arduino)
+- Avoid unnecessary redraws to reduce flashing
+- Metadata updates only occur on connect or change (low power impact)
 
-\[big\]Large\[/big\]\
-\[med\]Medium\[/med\]\
-\[small\]Small\[/small\]
+---
 
-Default: med
+## 🚀 Future Ideas
 
-------------------------------------------------------------------------
+- Full bitmap icon set
+- NFC wake/trigger
+- ultra-low-power timed advertising
+- OTA updates
 
-### Red Text
+---
 
-{This text is red}
+## 🏁 Summary
 
-------------------------------------------------------------------------
+This project is now:
 
-### Red Box (White Text)
+- 🔵 BLE-controlled
+- 🧠 self-describing (metadata)
+- 🔋 battery-capable
+- 🎨 visually polished
+- 📱 app-integrated
 
-{{This text is white in a red box}}
-
-Spaces are preserved inside double braces.
-
-------------------------------------------------------------------------
-
-### Combined Example
-
-\[big\]WT{F}\[/big\]`\n{{Clint's Office}}`{=tex}`\n[small]`{=tex}Why are
-you standing there\[/small\]
-
-------------------------------------------------------------------------
-
-## Presets
-
-### Recall
-
-1\
-2\
-3
-
-### Set
-
-SET1:Message\
-SET2:Message\
-SET3:Message
-
-------------------------------------------------------------------------
-
-## Behavior Notes
-
--   Text is centered horizontally and vertically
--   Messages auto-shrink if too tall
--   Extra lines may be omitted if still too large
--   E-paper refresh is slow (normal)
-
-------------------------------------------------------------------------
-
-## Key Functions
-
-drawMessage(msg): renders message\
-layoutText(msg, width): parses and wraps text\
-shrinkMarkupSizes(msg): reduces size if needed\
-setFontBySize(size): sets font\
-lineHeightForSize(size): calculates spacing
-
-------------------------------------------------------------------------
-
-## Startup Behavior
-
--   BLE advertising starts
--   Preset 1 is displayed automatically
-
-------------------------------------------------------------------------
-
-## Tips
-
--   Press RESET if needed after upload
--   Use UTF-8 strings only
--   Smart punctuation is normalized automatically
-
-------------------------------------------------------------------------
-
-## Version 1 Features
-
--   BLE message input
--   Rich text formatting
--   Word wrapping
--   Centered layout
--   Red text and boxed highlights
--   Presets (3 slots)
--   Auto font scaling
-
-------------------------------------------------------------------------
-
-## Version 2 Ideas
-
--   Icons on left side
--   Buttons for local control
--   Deep sleep mode
--   Custom fonts
+---
 
